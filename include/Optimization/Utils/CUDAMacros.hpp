@@ -1,0 +1,10 @@
+#ifndef OPTIMIZATION_UTILS_CUDA_MACROS_HPP_
+#define OPTIMIZATION_UTILS_CUDA_MACROS_HPP_
+
+#ifdef __CUDAACC__
+    #define CUDA_CALLABLE __host__ __device__
+#else
+    #define CUDA_CALLABLE
+#endif
+
+#endif // OPTIMIZATION_UTILS_CUDA_MACROS_HPP_
