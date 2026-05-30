@@ -24,7 +24,7 @@ namespace Optimization {
             inline DualVec<T, N> abs(const DualVec<T, N>& x) noexcept {
                 DualVec<T, N> res;
                 res.v = std::abs(x.v);
-                T sign = (x.v > static_cast<T>(0.0)) ? static_cast<T>(1.0) : ((x.v < staic_cast<T>(0.0)) ? static_cast<T>(-1.0) : static_cast<T>(0.0));
+                T sign = (x.v > static_cast<T>(0.0)) ? static_cast<T>(1.0) : ((x.v < static_cast<T>(0.0)) ? static_cast<T>(-1.0) : static_cast<T>(0.0));
                 res.scale_gradients_from(x, sign);
                 return res;
             }
