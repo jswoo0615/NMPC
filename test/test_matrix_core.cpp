@@ -4,10 +4,13 @@
 #include "Optimization/Matrix/Core/MathTraits.hpp"
 #include "Optimization/Matrix/Core/StaticMatrix.hpp"
 #include "Optimization/Matrix/Core/StaticMatrixView.hpp"
+#include "Optimization/Matrix/Linalg/Cholesky.hpp"
+#include "Optimization/Matrix/Linalg/LU.hpp"
 #include "Optimization/Utils/CUDAMacros.hpp"
 
 using namespace Optimization;
 using namespace Optimization::matrix;
+using namespace Optimization::linalg;
 
 // 1. Test CUDAMacros.hpp
 CUDA_CALLABLE int dummy_cuda_callable_func(int a, int b) {
@@ -134,4 +137,133 @@ TEST(MatrixCoreTest, StaticMatrixViewTest) {
     EXPECT_DOUBLE_EQ(raw_data[3], 0.0);
     EXPECT_DOUBLE_EQ(raw_data[4], 0.0);
     EXPECT_DOUBLE_EQ(raw_data[5], 6.0); // Should remain untouched
+}
+
+// 5. Test Cholesky.hpp
+TEST(MatrixCoreTest, CholeskyDecomposeAndSolveDouble) {
+    StaticMatrix<double, 3, 3> A;
+    A(0, 0) = 4.0;  A(0, 1) = 12.0; A(0, 2) = -16.0;
+    A(1, 0) = 12.0; A(1, 1) = 37.0; A(1, 2) = -43.0;
+    A(2, 0) = -16.0; A(2, 1) = -43.0; A(2, 2) = 98.0;
+
+    StaticMatrix<double, 3, 3> L;
+    MathStatus status = cholesky_decompose(A, L);
+    EXPECT_EQ(status, MathStatus::SUCCESS);
+
+    // Verify L
+    EXPECT_DOUBLE_EQ(L(0, 0), 2.0);
+    EXPECT_DOUBLE_EQ(L(0, 1), 0.0);
+    EXPECT_DOUBLE_EQ(L(0, 2), 0.0);
+    EXPECT_DOUBLE_EQ(L(1, 0), 6.0);
+    EXPECT_DOUBLE_EQ(L(1, 1), 1.0);
+    EXPECT_DOUBLE_EQ(L(1, 2), 0.0);
+    EXPECT_DOUBLE_EQ(L(2, 0), -8.0);
+    EXPECT_DOUBLE_EQ(L(2, 1), 5.0);
+    EXPECT_DOUBLE_EQ(L(2, 2), 3.0);
+
+    // Solve Ax = b
+    StaticMatrix<double, 3, 1> b;
+    b(0) = 76.0; b(1) = 215.0; b(2) = -396.0;
+
+    StaticMatrix<double, 3, 1> x;
+    cholesky_solver(L, b, x);
+
+    EXPECT_NEAR(x(0), 1.0, 1e-12);
+    EXPECT_NEAR(x(1), 2.0, 1e-12);
+    EXPECT_NEAR(x(2), -3.0, 1e-12);
+}
+
+TEST(MatrixCoreTest, CholeskyDecomposeAndSolveFloat) {
+    StaticMatrix<float, 3, 3> A;
+    A(0, 0) = 4.0f;  A(0, 1) = 12.0f; A(0, 2) = -16.0f;
+    A(1, 0) = 12.0f; A(1, 1) = 37.0f; A(1, 2) = -43.0f;
+    A(2, 0) = -16.0f; A(2, 1) = -43.0f; A(2, 2) = 98.0f;
+
+    StaticMatrix<float, 3, 3> L;
+    MathStatus status = cholesky_decompose(A, L);
+    EXPECT_EQ(status, MathStatus::SUCCESS);
+
+    // Verify L
+    EXPECT_FLOAT_EQ(L(0, 0), 2.0f);
+    EXPECT_FLOAT_EQ(L(0, 1), 0.0f);
+    EXPECT_FLOAT_EQ(L(0, 2), 0.0f);
+    EXPECT_FLOAT_EQ(L(1, 0), 6.0f);
+    EXPECT_FLOAT_EQ(L(1, 1), 1.0f);
+    EXPECT_FLOAT_EQ(L(1, 2), 0.0f);
+    EXPECT_FLOAT_EQ(L(2, 0), -8.0f);
+    EXPECT_FLOAT_EQ(L(2, 1), 5.0f);
+    EXPECT_FLOAT_EQ(L(2, 2), 3.0f);
+
+    // Solve Ax = b
+    StaticMatrix<float, 3, 1> b;
+    b(0) = 76.0f; b(1) = 215.0f; b(2) = -396.0f;
+
+    StaticMatrix<float, 3, 1> x;
+    cholesky_solver(L, b, x);
+
+    EXPECT_NEAR(x(0), 1.0f, 1e-5f);
+    EXPECT_NEAR(x(1), 2.0f, 1e-5f);
+    EXPECT_NEAR(x(2), -3.0f, 1e-5f);
+}
+
+TEST(MatrixCoreTest, CholeskySingular) {
+    StaticMatrix<double, 3, 3> A; // Zero matrix is singular
+    StaticMatrix<double, 3, 3> L;
+    MathStatus status = cholesky_decompose(A, L);
+    EXPECT_EQ(status, MathStatus::SINGULAR);
+}
+
+// 6. Test LU.hpp
+TEST(MatrixCoreTest, LUDecomposeAndSolveDouble) {
+    StaticMatrix<double, 3, 3> A;
+    A(0, 0) = 1.0; A(0, 1) = 2.0; A(0, 2) = 4.0;
+    A(1, 0) = 3.0; A(1, 1) = 8.0; A(1, 2) = 14.0;
+    A(2, 0) = 2.0; A(2, 1) = 6.0; A(2, 2) = 13.0;
+
+    StaticMatrix<double, 3, 3> LU;
+    std::array<int, 3> p;
+    MathStatus status = lu_decompose(A, LU, p);
+    EXPECT_EQ(status, MathStatus::SUCCESS);
+
+    // Solve Ax = b
+    StaticMatrix<double, 3, 1> b;
+    b(0) = 7.0; b(1) = 23.0; b(2) = 22.0;
+
+    StaticMatrix<double, 3, 1> x;
+    lu_solve(LU, p, b, x);
+
+    EXPECT_NEAR(x(0), 1.0, 1e-12);
+    EXPECT_NEAR(x(1), -1.0, 1e-12);
+    EXPECT_NEAR(x(2), 2.0, 1e-12);
+}
+
+TEST(MatrixCoreTest, LUDecomposeAndSolveFloat) {
+    StaticMatrix<float, 3, 3> A;
+    A(0, 0) = 1.0f; A(0, 1) = 2.0f; A(0, 2) = 4.0f;
+    A(1, 0) = 3.0f; A(1, 1) = 8.0f; A(1, 2) = 14.0f;
+    A(2, 0) = 2.0f; A(2, 1) = 6.0f; A(2, 2) = 13.0f;
+
+    StaticMatrix<float, 3, 3> LU;
+    std::array<int, 3> p;
+    MathStatus status = lu_decompose(A, LU, p);
+    EXPECT_EQ(status, MathStatus::SUCCESS);
+
+    // Solve Ax = b
+    StaticMatrix<float, 3, 1> b;
+    b(0) = 7.0f; b(1) = 23.0f; b(2) = 22.0f;
+
+    StaticMatrix<float, 3, 1> x;
+    lu_solve(LU, p, b, x);
+
+    EXPECT_NEAR(x(0), 1.0f, 1e-5f);
+    EXPECT_NEAR(x(1), -1.0f, 1e-5f);
+    EXPECT_NEAR(x(2), 2.0f, 1e-5f);
+}
+
+TEST(MatrixCoreTest, LUSingular) {
+    StaticMatrix<double, 3, 3> A; // Zero matrix
+    StaticMatrix<double, 3, 3> LU;
+    std::array<int, 3> p;
+    MathStatus status = lu_decompose(A, LU, p);
+    EXPECT_EQ(status, MathStatus::SINGULAR);
 }
