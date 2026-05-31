@@ -14,8 +14,10 @@ set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
 check_language(CUDA)
 
 add_executable(test_matrix_core test/test_matrix_core.cpp)
-
 target_include_directories(test_matrix_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
+add_executable(test_dynamics test/test_dynamics.cpp)
+target_include_directories(test_dynamics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 include(FetchContent)
 FetchContent_Declare(
@@ -26,3 +28,4 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 target_link_libraries(test_matrix_core gtest_main)
+target_link_libraries(test_dynamics gtest_main)
