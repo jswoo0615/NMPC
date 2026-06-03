@@ -18,10 +18,12 @@ public:
     TireLoadParams<double> tire_params_base;
     double kappa = 0.0;
 
-    CUDA_CALLABLE RealTimeDynamicsModel() {
+    CUDA_CALLABLE RealTimeDynamicsModel() { // (HighFidelity도 동일하게 수정)
         // 기본 파라미터 초기화
         veh_params_base = {1500.0, 9.81, 1.2, 1.6, 0.5, 1.6, 1.6, 0.6, 100.0, 3000.0};
-        tire_params_base = {1.0, 0.0001, 4000.0, 4000.0, 15.0, 1.4, 0.1, 0.15, 0.15};
+        
+        // [Architect's Correction] c1=15.0, c2=0.0002 로 정상 타이어 코너링 강성 복구
+        tire_params_base = {1.0, 0.0001, 4000.0, 15.0, 0.0002, 1.4, 0.1, 0.15, 0.15};
     }
 
     template <typename T>
