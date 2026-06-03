@@ -20,7 +20,7 @@ namespace Optimization {
          * @tparam Nx 상태 (State) 벡터의 차원 (예: 차량의 x, y, yaw, v 등)
          * @tparam Nu 제어 (Control) 벡터의 차원 (예 : 가속도, 조향각 등)
          */
-        template <std::size_t M, std::size_t Nx, std::size_t Nu>
+        template <std::size_t H, std::size_t Nx, std::size_t Nu>
         class RiccatiSolver {
             public:
                 /**
@@ -101,7 +101,7 @@ namespace Optimization {
 
                     // 종단 Value Function 정착화
                     for (std::size_t i = 0; i < Nx; ++i) {
-                        P[H](i, j) += reg_x;
+                        P[H](i, i) += reg_x;
                     }
 
                     /**
