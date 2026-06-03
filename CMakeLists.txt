@@ -22,6 +22,9 @@ target_include_directories(test_dynamics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc
 add_executable(test_solver test/test_solver.cpp)
 target_include_directories(test_solver PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
+add_executable(test_NMPC test/test_NMPC.cpp)
+target_include_directories(test_NMPC PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
 include(FetchContent)
 FetchContent_Declare(
   googletest
@@ -33,3 +36,4 @@ FetchContent_MakeAvailable(googletest)
 target_link_libraries(test_matrix_core gtest_main)
 target_link_libraries(test_dynamics gtest_main)
 target_link_libraries(test_solver gtest_main)
+target_link_libraries(test_NMPC gtest_main)
