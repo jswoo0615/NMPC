@@ -1,6 +1,7 @@
 #include <iostream>
 #include <iomanip>
 #include <array>
+#include <fstream> // CSV 파일 저장을 위한 헤더 추가
 
 // 깎아온 핵심 헤더 인클루드 (경로는 프로젝트 구조에 맞게 수정)
 #include "Optimization/Control/NMPC_Controller.hpp"
@@ -13,7 +14,7 @@ using namespace Optimization::Dynamics;
 
 int main() {
     // 1. 아키텍처 환경 설정
-    constexpr size_t H = 10;           // 예측 구간 (초기 테스트용 짧은 Horizon)
+    constexpr size_t H = 30;           // 예측 구간 (1.5초)
     constexpr size_t Nx = 8;           // 상태 변수
     constexpr size_t Nu = 2;           // 제어 입력
     constexpr double dt = 0.05;        // 제어 주기 (50ms)
@@ -21,25 +22,30 @@ int main() {
     // 메인 컨트롤러 인스턴스화 (RealTimeDynamicsModel 주입)
     NMPC_Controller<RealTimeDynamicsModel, H, Nx, Nu> nmpc;
 
-    // 2. 입법자(Legislator)의 가중치(Penalty) 제정
+    // 2. 입법자(Legislator)의 가중치(Penalty) 제정 (Smoothing Tuning 적용)
     matrix::StaticMatrix<double, Nx, Nx> Q;
     Q.set_zero();
-    // 종방향 거리(s)는 추종하지 않음 (가중치 0)
-    Q(1, 1) = 100.0;  // d: 횡방향 이탈 오차에 강력한 페널티
-    Q(2, 2) = 100.0;  // mu: 헤딩(요각) 오차에 강력한 페널티
-    Q(3, 3) = 10.0;   // vx: 목표 속도(10m/s) 유지
-    Q(4, 4) = 1.0;    // vy: 횡방향 미끄러짐(슬립) 억제
-    Q(5, 5) = 1.0;    // r: 급격한 요레이트 발생 억제
-    Q(6, 6) = 0.1;    // 전륜 타이어 슬립각 억제
-    Q(7, 7) = 0.1;    // 후륜 타이어 슬립각 억제
+    Q(1, 1) = 100.0;  // d: 오차 페널티
+    Q(2, 2) = 50.0;   // mu: 헤딩 페널티
+    Q(3, 3) = 10.0;   // vx: 속도 유지
+    Q(4, 4) = 1.0;    // vy
+    Q(5, 5) = 1.0;    // r
+    Q(6, 6) = 1000.0; // alpha_f: 전륜 타이어 슬립 폭주 방지
+    Q(7, 7) = 1000.0; // alpha_r: 후륜 타이어 슬립 폭주 방지
+
+    // 종단 비용(Terminal Cost) 강화
+    matrix::StaticMatrix<double, Nx, Nx> Q_term = Q;
+    for (size_t i = 0; i < Nx; ++i) {
+        Q_term(i, i) *= 5.0; 
+    }
 
     matrix::StaticMatrix<double, Nu, Nu> R;
     R.set_zero();
-    R(0, 0) = 50.0;   // delta: 과도한 스티어링 억제
-    R(1, 1) = 5.0;    // a: 과도한 가감속 억제
+    R(0, 0) = 5000.0; // delta: 조향 페널티 극단적 강화 (부드러운 조향 유도)
+    R(1, 1) = 50.0;   // a: 가감속 페널티
 
-    // 컨트롤러에 법(Cost) 공포
-    nmpc.init(Q, Q, R);
+    // 컨트롤러에 법(Cost) 공포 및 dt 주입
+    nmpc.init(Q, Q_term, R, dt);
 
     // 3. 상위 플래너(Local Planner)의 목표 궤적 수신
     // 시나리오: 일직선 차선(d=0, mu=0)을 10m/s로 정속 주행
@@ -58,6 +64,18 @@ int main() {
     x0(2) = 0.087;  // mu = +0.087 rad
     x0(3) = 10.0;   // vx = +10.0 m/s
 
+    // =========================================================================
+    // CSV 로깅 파일 열기
+    // =========================================================================
+    std::ofstream log_file("nmpc_simulation_log.csv");
+    if (!log_file.is_open()) {
+        std::cerr << "[Error] Failed to open CSV file for logging." << std::endl;
+        return -1;
+    }
+    
+    // CSV 헤더 작성
+    log_file << "step,d,mu,vx,delta,a\n";
+
     // 5. Closed-Loop 시뮬레이션 가동
     std::cout << "=== NMPC Closed-Loop Commissioning ===" << std::endl;
     std::cout << std::fixed << std::setprecision(4);
@@ -65,11 +83,11 @@ int main() {
     std::cout << "------------------------------------------------------------" << std::endl;
 
     // 30스텝(1.5초) 주행 테스트
-    for (int step = 0; step < 30; ++step) {
-        // 5-1. NMPC 엔진 구동 (최대 3회 Iteration, 허용 오차 1e-3)
-        auto u_opt = nmpc.compute_control(x0, 3, 1e-3);
+    for (int step = 0; step < 100; ++step) {
+        // 5-1. NMPC 엔진 구동 (최대 5회 Iteration, 허용 오차 1e-4)
+        auto u_opt = nmpc.compute_control(x0, 5, 1e-4);
 
-        // 현재 상태 및 제어 입력 모니터링 출력
+        // 콘솔 모니터링 출력
         std::cout << std::setw(4) << step << " | "
                   << std::setw(7) << x0(1) << " | "
                   << std::setw(7) << x0(2) << " | "
@@ -77,15 +95,22 @@ int main() {
                   << std::setw(10) << u_opt(0) << " | "
                   << std::setw(9) << u_opt(1) << std::endl;
 
-        // 5-2. Plant 시뮬레이션 (Layer 3: 기초적인 Forward Euler 적분기)
-        // 실제 차량이 제어 입력을 받아 다음 상태로 넘어가는 물리적 현상을 시뮬레이션
+        // CSV 데이터 기록
+        log_file << step << ","
+                 << x0(1) << ","
+                 << x0(2) << ","
+                 << x0(3) << ","
+                 << u_opt(0) << ","
+                 << u_opt(1) << "\n";
+
+        // 5-2. Plant 시뮬레이션 (Forward Euler Integration)
         matrix::StaticVector<Dual<double>, Nx> x_dual;
         for(size_t i = 0; i < Nx; ++i) x_dual(i) = Dual<double>(x0(i), 0.0);
         
         matrix::StaticVector<Dual<double>, Nu> u_dual;
         for(size_t i = 0; i < Nu; ++i) u_dual(i) = Dual<double>(u_opt(i), 0.0);
 
-        // 8차원 동역학 모델 평가
+        // 동역학 모델 평가 (상태 변화율 계산)
         auto x_dot_dual = nmpc.dynamics_model(x_dual, u_dual);
 
         // Euler Integration: x_{k+1} = x_k + x_dot * dt
@@ -96,6 +121,11 @@ int main() {
         // 5-3. Warm-start 메커니즘 가동 (궤적 1칸 전진)
         nmpc.shift_trajectory();
     }
+
+    // 파일 닫기
+    log_file.close();
+    std::cout << "------------------------------------------------------------" << std::endl;
+    std::cout << "Simulation complete. Data saved to 'nmpc_simulation_log.csv'." << std::endl;
 
     return 0;
 }

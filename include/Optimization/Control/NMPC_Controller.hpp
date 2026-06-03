@@ -9,144 +9,113 @@
 #include "Optimization/Matrix/AD/Dual.hpp"
 #include "Optimization/Solver/RiccatiSolver.hpp"
 #include "Optimization/Solver/SolverStatus.hpp"
+#include "Optimization/Solver/MeritLineSearch.hpp"
 
-// 사용자 정의 Dual 타입 (모델의 템플릿 호환성을 위해)
 using Optimization::Dual;
 
 namespace Optimization {
 namespace control {
 
-/**
- * @brief NMPC (Nonlinear Model Predictive Control) 메인 컨트롤러
- * @details [Architect's Design]
- * - 다중 사격법(Multiple Shooting) 기반 무제약 SQP / DDP 아우터 루프.
- * - 동적 메모리 할당(Heap)을 완전 배제한 정적 파이프라인.
- * @tparam Model 동역학 모델 펑터 (RealTimeDynamicsModel 또는 HighFidelityDynamicsModel)
- * @tparam H 예측 구간 (Horizon)
- * @tparam Nx 상태 벡터 차원 (기본 8)
- * @tparam Nu 제어 입력 차원 (기본 2)
- */
 template <typename Model, size_t H, size_t Nx = 8, size_t Nu = 2>
 class NMPC_Controller {
    public:
-    // =========================================================================
-    // [1] 핵심 코어 부품
-    // =========================================================================
     Model dynamics_model;
     solver::RiccatiSolver<H, Nx, Nu> riccati;
 
-    // =========================================================================
-    // [2] 튜닝 파라미터 (가중치 행렬)
-    // =========================================================================
     matrix::StaticMatrix<double, Nx, Nx> Q_weight;
     matrix::StaticMatrix<double, Nx, Nx> Q_terminal;
     matrix::StaticMatrix<double, Nu, Nu> R_weight;
 
-    // =========================================================================
-    // [3] 내부 상태 궤적 (Current Guess) 및 목표 궤적 (Reference)
-    // =========================================================================
     std::array<matrix::StaticVector<double, Nx>, H + 1> x_guess;
     std::array<matrix::StaticVector<double, Nu>, H> u_guess;
     std::array<matrix::StaticVector<double, Nx>, H + 1> x_ref;
 
-    // 초기화 함수
+    // [Architect's Update] 제어 주기(dt) 추가
+    double dt_ = 0.05;
+    bool is_first_run_ = true;
+
+    // init 시 dt 파라미터 추가
     void init(const matrix::StaticMatrix<double, Nx, Nx>& Q,
               const matrix::StaticMatrix<double, Nx, Nx>& Q_term,
-              const matrix::StaticMatrix<double, Nu, Nu>& R) {
+              const matrix::StaticMatrix<double, Nu, Nu>& R,
+              double dt = 0.05) {
         Q_weight = Q;
         Q_terminal = Q_term;
         R_weight = R;
+        dt_ = dt;
 
         for (size_t k = 0; k <= H; ++k) {
             x_guess[k].set_zero();
             x_ref[k].set_zero();
             if (k < H) u_guess[k].set_zero();
         }
+        is_first_run_ = true;
     }
 
-    /**
-     * @brief 목표 궤적 주입 (Local Planner로부터 수신)
-     */
     void set_reference_trajectory(const std::array<matrix::StaticVector<double, Nx>, H + 1>& ref) {
         x_ref = ref;
     }
 
-    // =========================================================================
-    // [4] SQP 아우터 루프 (Outer-Loop)
-    // =========================================================================
-    /**
-     * @brief NMPC 최적화 수행
-     * @param x0 현재 차량의 관측 상태 (Initial State)
-     * @param max_iter SQP 최대 반복 횟수
-     * @param tol 수렴 판정 허용 오차
-     * @return 계산된 최적의 첫 번째 제어 입력
-     */
     matrix::StaticVector<double, Nu> compute_control(const matrix::StaticVector<double, Nx>& x0, 
                                                      int max_iter = 5, 
                                                      double tol = 1e-4) {
-        // 1. 초기 조건 강제 할당 (다중 사격법의 0번 노드는 항상 현재 상태)
+        // [Architect's Update] 첫 실행 시 초기 상태(x0)를 Horizon 전체에 복사 (Warm-Start 초기화)
+        // 정지 상태(v=0)의 특이점(Singularity) 방지 및 초기 Defect 폭주 방지
+        if (is_first_run_) {
+            for (size_t k = 0; k <= H; ++k) x_guess[k] = x0;
+            is_first_run_ = false;
+        }
+        
         x_guess[0] = x0;
 
         for (int iter = 0; iter < max_iter; ++iter) {
             double max_defect = 0.0;
 
             // -----------------------------------------------------------------
-            // Phase 1: 선형화 및 KKT 시스템 조립 (Evaluation & Linearization)
+            // Phase 1: 선형화 및 KKT 시스템 조립 (Euler Discretization 적용)
             // -----------------------------------------------------------------
             for (size_t k = 0; k < H; ++k) {
-                // 1-1. 상태 1차항 가중치 (Gradient): q_k = Q * (x_guess_k - x_ref_k)
                 matrix::StaticVector<double, Nx> x_err;
-                for(size_t i = 0; i < Nx; ++i) {
-                    x_err(i) = x_guess[k](i) - x_ref[k](i);
-                }
+                for(size_t i = 0; i < Nx; ++i) x_err(i) = x_guess[k](i) - x_ref[k](i);
                 linalg::multiply(Q_weight, x_err, riccati.q[k]);
                 riccati.Q[k] = Q_weight;
 
-                // 1-2. 제어 1차항 가중치 (Gradient): r_k = R * u_guess_k
                 linalg::multiply(R_weight, u_guess[k], riccati.r[k]);
                 riccati.R[k] = R_weight;
 
-                // 1-3. 자동 미분(Dual)을 통한 해석적 야코비안 (A_k, B_k) 및 잔차(d_k) 추출
-                // A 행렬 (상태 야코비안) 추출
+                // [Architect's Update] A_discrete = I + A_continuous * dt
                 for (size_t i = 0; i < Nx; ++i) {
                     matrix::StaticVector<Dual<double>, Nx> x_dual;
-                    for (size_t j = 0; j < Nx; ++j) {
-                        x_dual(j) = Dual<double>(x_guess[k](j), (i == j) ? 1.0 : 0.0);
-                    }
+                    for (size_t j = 0; j < Nx; ++j) x_dual(j) = Dual<double>(x_guess[k](j), (i == j) ? 1.0 : 0.0);
                     matrix::StaticVector<Dual<double>, Nu> u_dual;
-                    for (size_t j = 0; j < Nu; ++j) {
-                        u_dual(j) = Dual<double>(u_guess[k](j), 0.0);
-                    }
+                    for (size_t j = 0; j < Nu; ++j) u_dual(j) = Dual<double>(u_guess[k](j), 0.0);
 
-                    auto x_next_dual = dynamics_model(x_dual, u_dual);
+                    auto x_dot_dual = dynamics_model(x_dual, u_dual);
                     
                     for (size_t j = 0; j < Nx; ++j) {
-                        riccati.A[k](j, i) = x_next_dual(j).d; // 미분값(야코비안) 저장
+                        double I_mat = (i == j) ? 1.0 : 0.0;
+                        riccati.A[k](j, i) = I_mat + x_dot_dual(j).d * dt_; 
                     }
                 }
 
-                // B 행렬 (입력 야코비안) 추출 및 동역학 잔차(Defect) 추출
+                // [Architect's Update] B_discrete = B_continuous * dt
                 for (size_t i = 0; i < Nu; ++i) {
                     matrix::StaticVector<Dual<double>, Nx> x_dual;
-                    for (size_t j = 0; j < Nx; ++j) {
-                        x_dual(j) = Dual<double>(x_guess[k](j), 0.0);
-                    }
+                    for (size_t j = 0; j < Nx; ++j) x_dual(j) = Dual<double>(x_guess[k](j), 0.0);
                     matrix::StaticVector<Dual<double>, Nu> u_dual;
-                    for (size_t j = 0; j < Nu; ++j) {
-                        u_dual(j) = Dual<double>(u_guess[k](j), (i == j) ? 1.0 : 0.0);
-                    }
+                    for (size_t j = 0; j < Nu; ++j) u_dual(j) = Dual<double>(u_guess[k](j), (i == j) ? 1.0 : 0.0);
 
-                    auto x_next_dual = dynamics_model(x_dual, u_dual);
+                    auto x_dot_dual = dynamics_model(x_dual, u_dual);
                     
                     for (size_t j = 0; j < Nx; ++j) {
-                        riccati.B[k](j, i) = x_next_dual(j).d; // 미분값(야코비안) 저장
+                        riccati.B[k](j, i) = x_dot_dual(j).d * dt_; 
                     }
 
-                    // i == 0 일 때 1회만 물리 법칙 비선형 평가 결과(v)를 가져와 잔차 계산
                     if (i == 0) {
                         for (size_t j = 0; j < Nx; ++j) {
-                            // d_k = f(x_k, u_k) - x_{k+1}
-                            riccati.d[k](j) = x_next_dual(j).v - x_guess[k + 1](j);
+                            // [Architect's Update] Discrete Defect: x_{k} + \dot{x}*dt - x_{k+1}
+                            double x_next_sim = x_guess[k](j) + x_dot_dual(j).v * dt_;
+                            riccati.d[k](j) = x_next_sim - x_guess[k + 1](j);
                             
                             double abs_d = std::abs(riccati.d[k](j));
                             if (abs_d > max_defect) max_defect = abs_d;
@@ -155,7 +124,6 @@ class NMPC_Controller {
                 }
             }
 
-            // 종단(Terminal) 비용 설정
             matrix::StaticVector<double, Nx> x_err_H;
             for(size_t i = 0; i < Nx; ++i) x_err_H(i) = x_guess[H](i) - x_ref[H](i);
             linalg::multiply(Q_terminal, x_err_H, riccati.q[H]);
@@ -164,47 +132,91 @@ class NMPC_Controller {
             // -----------------------------------------------------------------
             // Phase 2: 이너 루프 (Riccati Solver 실행)
             // -----------------------------------------------------------------
-            // 정칙화(Regularization) 주입으로 고유값 붕괴 방어
             SolverStatus status = riccati.solve(1e-4, 1e-6);
             if (status != SolverStatus::SUCCESS) {
-                // 수치적 발산 (LDLT 실패) 발생 시 궤환 중단, 안전한 이전 제어 반환 (Fallback)
-                return u_guess[0];
+                return u_guess[0]; // 발산 방지 폴백
             }
 
             // -----------------------------------------------------------------
-            // Phase 3: 궤적 갱신 (Trajectory Update with Backtracking Line Search 뼈대)
+            // Phase 3: 궤적 갱신 (Armijo Backtracking Line Search)
             // -----------------------------------------------------------------
-            double alpha = 1.0; // 향후 Merit Function 기반 감쇠를 위한 변수
-            double max_dx = 0.0;
+            auto calc_merit = [&](const std::array<matrix::StaticVector<double, Nx>, H + 1>& x_traj,
+                                  const std::array<matrix::StaticVector<double, Nu>, H>& u_traj) -> double {
+                double merit = 0.0;
+                constexpr double SIGMA_PENALTY = 100.0;
 
+                for (size_t k = 0; k < H; ++k) {
+                    matrix::StaticVector<double, Nx> x_err;
+                    for (size_t i = 0; i < Nx; ++i) x_err(i) = x_traj[k](i) - x_ref[k](i);
+                    
+                    matrix::StaticVector<double, Nx> Qx;
+                    linalg::multiply(Q_weight, x_err, Qx);
+                    for (size_t i = 0; i < Nx; ++i) merit += 0.5 * x_err(i) * Qx(i);
+
+                    matrix::StaticVector<double, Nu> Ru;
+                    linalg::multiply(R_weight, u_traj[k], Ru);
+                    for (size_t i = 0; i < Nu; ++i) merit += 0.5 * u_traj[k](i) * Ru(i);
+
+                    // [Architect's Update] Merit Function에도 동일하게 Euler 적분 적용
+                    matrix::StaticVector<double, Nx> x_curr = x_traj[k];
+                    matrix::StaticVector<double, Nu> u_curr = u_traj[k];
+                    matrix::StaticVector<double, Nx> x_dot_sim = dynamics_model(x_curr, u_curr);
+                    
+                    for (size_t i = 0; i < Nx; ++i) {
+                        double x_next_sim = x_curr(i) + x_dot_sim(i) * dt_;
+                        double defect = x_next_sim - x_traj[k + 1](i);
+                        merit += SIGMA_PENALTY * std::abs(defect);
+                    }
+                }
+                
+                matrix::StaticVector<double, Nx> x_err_H_term;
+                for (size_t i = 0; i < Nx; ++i) x_err_H_term(i) = x_traj[H](i) - x_ref[H](i);
+                matrix::StaticVector<double, Nx> Qx_H;
+                linalg::multiply(Q_terminal, x_err_H_term, Qx_H);
+                for (size_t i = 0; i < Nx; ++i) merit += 0.5 * x_err_H_term(i) * Qx_H(i);
+
+                return merit;
+            };
+
+            double current_merit = calc_merit(x_guess, u_guess);
+
+            auto evaluator = [&](double alpha) -> double {
+                std::array<matrix::StaticVector<double, Nx>, H + 1> x_temp = x_guess;
+                std::array<matrix::StaticVector<double, Nu>, H> u_temp = u_guess;
+
+                for (size_t k = 0; k < H; ++k) {
+                    for (size_t i = 0; i < Nx; ++i) x_temp[k + 1](i) += alpha * riccati.dx[k + 1](i);
+                    for (size_t i = 0; i < Nu; ++i) u_temp[k](i) += alpha * riccati.du[k](i);
+                }
+                return calc_merit(x_temp, u_temp);
+            };
+
+            double opt_alpha = solver::MeritLineSearch::run(evaluator, current_merit, 0.0);
+
+            double max_dx = 0.0;
             for (size_t k = 0; k < H; ++k) {
                 for (size_t i = 0; i < Nx; ++i) {
-                    double step_x = alpha * riccati.dx[k + 1](i);
+                    double step_x = opt_alpha * riccati.dx[k + 1](i);
                     x_guess[k + 1](i) += step_x;
                     
-                    double abs_dx = std::abs(step_x);
-                    if (abs_dx > max_dx) max_dx = abs_dx;
+                    if (std::abs(step_x) > max_dx) max_dx = std::abs(step_x);
                 }
                 for (size_t i = 0; i < Nu; ++i) {
-                    u_guess[k](i) += alpha * riccati.du[k](i);
+                    u_guess[k](i) += opt_alpha * riccati.du[k](i);
                 }
             }
 
             // -----------------------------------------------------------------
             // Phase 4: 수렴 판정 (Convergence Check)
             // -----------------------------------------------------------------
-            // 다중 사격법의 동역학 위반량(Defect)과 보폭(dx)이 모두 허용치 이내면 조기 종료
             if (max_defect < tol && max_dx < tol) {
                 break;
             }
-        } // End of max_iter loop
+        } 
 
         return u_guess[0];
-    } // End of compute_control function
+    } 
 
-    /**
-     * @brief 다음 제어 주기를 위한 Warm-Start (궤적 한 스텝 당기기)
-     */
     void shift_trajectory() {
         for (size_t k = 0; k < H - 1; ++k) {
             x_guess[k] = x_guess[k + 1];
