@@ -5,7 +5,7 @@
 #include "Optimization/Solver/FallbackControl.hpp"
 
 using namespace Optimization;
-using namespace Optimization::Solver;
+using namespace Optimization::solver;
 
 TEST(SolverTest, KKTMonitorEvaluateEQP) {
     // 3 variables, 2 constraints

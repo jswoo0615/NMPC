@@ -14,17 +14,6 @@
 namespace Optimization {
 namespace solver {
 
-/**
- * @brief 고속 Real-Time QP 솔버 (IPM + Riccati 융합 아키텍처)
- * @details [Architect's Update]
- * 밀집 행렬(Dense) LDLT 분해를 철거하고 RiccatiSolver를 이너 루프로 이식하여 O(H) 속도 달성.
- * Primal-Dual IPM의 엄밀한 Newton Step 추적 및 잔차 누적(Accumulation) 로직 이식 완료.
- * @tparam H 예측 구간
- * @tparam Nx 상태 차원
- * @tparam Nu 제어 차원
- * @tparam Ncx 스텝당 상태 부등식 제약 조건 수 (Cx * dx + dcx <= 0)
- * @tparam Ncu 스텝당 입력 부등식 제약 조건 수 (Cu * du + dcu <= 0)
- */
 template <size_t H, size_t Nx, size_t Nu, size_t Ncx, size_t Ncu>
 class RT_QPSolver {
    public:
@@ -32,31 +21,28 @@ class RT_QPSolver {
     static constexpr double TAU = 0.995;
     static constexpr double MIN_SLACK = 1e-8;
 
-    // 코어 엔진
+    static constexpr double W_SLACK_X = 1e5; 
+    static constexpr double W_SLACK_U = 1e5;
+
     RiccatiSolver<H, Nx, Nu> riccati;
 
-    // =========================================================================
-    // 제약 조건 파라미터 (SQP 아우터 루프에서 매 스텝 주입)
-    // =========================================================================
     std::array<matrix::StaticMatrix<double, Ncx, Nx>, H + 1> Cx;
     std::array<matrix::StaticVector<double, Ncx>, H + 1> dcx;
     
     std::array<matrix::StaticMatrix<double, Ncu, Nu>, H> Cu;
     std::array<matrix::StaticVector<double, Ncu>, H> dcu;
 
-    // =========================================================================
-    // 내부점 (Interior-Point) 변수
-    // =========================================================================
     std::array<matrix::StaticVector<double, Ncx>, H + 1> sx, zx; 
     std::array<matrix::StaticVector<double, Ncu>, H> su, zu;     
 
-    // 해답 궤적 (Primal Variables)
+    std::array<matrix::StaticVector<double, Ncx>, H + 1>& dual_x = zx;
+
     std::array<matrix::StaticVector<double, Nx>, H + 1> dx_opt;
     std::array<matrix::StaticVector<double, Nu>, H> du_opt;
 
     void init_interior_points() {
         for (size_t k = 0; k <= H; ++k) {
-            for (size_t i = 0; i < Nx; ++i) dx_opt[k](i) = 0.0; // [핵심 교정] 탐색 시작점 0으로 엄밀히 초기화
+            for (size_t i = 0; i < Nx; ++i) dx_opt[k](i) = 0.0; 
             for (size_t i = 0; i < Ncx; ++i) { sx[k](i) = 1.0; zx[k](i) = 1.0; }
             if (k < H) {
                 for (size_t i = 0; i < Nu; ++i) du_opt[k](i) = 0.0;
@@ -79,9 +65,6 @@ class RT_QPSolver {
             double mu = 0.0;
             size_t total_constraints = (H + 1) * Ncx + H * Ncu;
             
-            // -----------------------------------------------------------------
-            // 1. KKT 잔차 계산 및 Duality Measure (mu) 산출
-            // -----------------------------------------------------------------
             std::array<matrix::StaticVector<double, Ncx>, H + 1> r_cx, r_dx;
             std::array<matrix::StaticVector<double, Ncu>, H> r_cu, r_du;
 
@@ -89,16 +72,13 @@ class RT_QPSolver {
                 for (size_t i = 0; i < Ncx; ++i) {
                     double cx_dx = 0.0;
                     for (size_t j = 0; j < Nx; ++j) cx_dx += Cx[k](i, j) * dx_opt[k](j);
-                    
                     mu += sx[k](i) * zx[k](i);
-                    // [핵심 교정] 현재까지의 궤적(dx_opt)이 반영된 엄밀한 Primal 잔차 계산
                     r_dx[k](i) = cx_dx + dcx[k](i) + sx[k](i); 
                 }
                 if (k < H) {
                     for (size_t i = 0; i < Ncu; ++i) {
                         double cu_du = 0.0;
                         for (size_t j = 0; j < Nu; ++j) cu_du += Cu[k](i, j) * du_opt[k](j);
-
                         mu += su[k](i) * zu[k](i);
                         r_du[k](i) = cu_du + dcu[k](i) + su[k](i);
                     }
@@ -124,13 +104,9 @@ class RT_QPSolver {
                 return SolverStatus::SUCCESS;
             }
 
-            // -----------------------------------------------------------------
-            // 2. Riccati 엔진에 주입할 변조된 비용 함수(Schur Complement) 조립
-            // -----------------------------------------------------------------
             for (size_t k = 0; k <= H; ++k) {
                 riccati.Q[k] = Q[k];
                 
-                // [핵심 교정] 현재까지의 Q * dx_opt 기울기 반영
                 for (size_t i = 0; i < Nx; ++i) {
                     double q_dx = 0.0;
                     for (size_t j = 0; j < Nx; ++j) q_dx += Q[k](i, j) * dx_opt[k](j);
@@ -139,8 +115,13 @@ class RT_QPSolver {
 
                 for (size_t i = 0; i < Ncx; ++i) {
                     double inv_s = 1.0 / MathTraits<double>::max(sx[k](i), MIN_SLACK);
-                    double w_x = zx[k](i) * inv_s;
-                    double t_x = (zx[k](i) * r_dx[k](i) - r_cx[k](i)) * inv_s;
+                    double w_x_hard = MathTraits<double>::max(zx[k](i) * inv_s, MIN_SLACK);
+                    
+                    double w_x = 1.0 / ((1.0 / w_x_hard) + (1.0 / W_SLACK_X));
+                    
+                    // [Architect's Core Fix] Gradient-Hessian Consistency
+                    // 선형화 벡터 보정 항(t_x)에도 소프트 페널티 가중치 w_x를 엄밀하게 적용하여 수치 붕괴 방지
+                    double t_x = w_x * r_dx[k](i) - r_cx[k](i) * inv_s;
 
                     for (size_t r_idx = 0; r_idx < Nx; ++r_idx) {
                         riccati.q[k](r_idx) += Cx[k](i, r_idx) * (zx[k](i) + t_x);
@@ -171,8 +152,12 @@ class RT_QPSolver {
 
                     for (size_t i = 0; i < Ncu; ++i) {
                         double inv_s = 1.0 / MathTraits<double>::max(su[k](i), MIN_SLACK);
-                        double w_u = zu[k](i) * inv_s;
-                        double t_u = (zu[k](i) * r_du[k](i) - r_cu[k](i)) * inv_s;
+                        double w_u_hard = MathTraits<double>::max(zu[k](i) * inv_s, MIN_SLACK);
+                        
+                        double w_u = 1.0 / ((1.0 / w_u_hard) + (1.0 / W_SLACK_U));
+                        
+                        // [Architect's Core Fix] Input Constraint Consistency
+                        double t_u = w_u * r_du[k](i) - r_cu[k](i) * inv_s;
 
                         for (size_t r_idx = 0; r_idx < Nu; ++r_idx) {
                             riccati.r[k](r_idx) += Cu[k](i, r_idx) * (zu[k](i) + t_u);
@@ -184,16 +169,10 @@ class RT_QPSolver {
                 }
             }
 
-            // -----------------------------------------------------------------
-            // 3. 초고속 Riccati 선형 시스템 풀이 (O(H))
-            // -----------------------------------------------------------------
             if (riccati.solve(1e-6, 1e-6) != SolverStatus::SUCCESS) {
                 return SolverStatus::MATH_ERROR;
             }
 
-            // -----------------------------------------------------------------
-            // 4. 슬랙(Slack) 및 쌍대(Dual) 변수 Back-substitution (탐색 방향 도출)
-            // -----------------------------------------------------------------
             std::array<matrix::StaticVector<double, Ncx>, H + 1> dsx, dzx;
             std::array<matrix::StaticVector<double, Ncu>, H> dsu, dzu;
 
@@ -219,9 +198,6 @@ class RT_QPSolver {
                 }
             }
 
-            // -----------------------------------------------------------------
-            // 5. Fraction-to-Boundary Rule (Branchless Step Size)
-            // -----------------------------------------------------------------
             double alpha_p = 1.0, alpha_d = 1.0;
 
             for (size_t k = 0; k <= H; ++k) {
@@ -241,9 +217,6 @@ class RT_QPSolver {
                 }
             }
 
-            // -----------------------------------------------------------------
-            // 6. 궤적 및 내부점 '누적 업데이트' (Newton Step Integration)
-            // -----------------------------------------------------------------
             for (size_t k = 0; k <= H; ++k) {
                 for (size_t i = 0; i < Nx; ++i) dx_opt[k](i) += alpha_p * riccati.dx[k](i); 
                 for (size_t i = 0; i < Ncx; ++i) {
@@ -251,7 +224,7 @@ class RT_QPSolver {
                     zx[k](i) += alpha_d * dzx[k](i);
                 }
                 if (k < H) {
-                    for (size_t i = 0; i < Nu; ++i) du_opt[k](i) += alpha_p * riccati.du[k](i); // [핵심 교정] 누적
+                    for (size_t i = 0; i < Nu; ++i) du_opt[k](i) += alpha_p * riccati.du[k](i);
                     for (size_t i = 0; i < Ncu; ++i) {
                         su[k](i) += alpha_p * dsu[k](i);
                         zu[k](i) += alpha_d * dzu[k](i);
