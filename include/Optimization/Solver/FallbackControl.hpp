@@ -5,7 +5,7 @@
 #include <cmath>
 
 namespace Optimization {
-namespace Solver {
+namespace solver {
 
 // =========================================================================
 // Fallback Control & Robustness Monitoring Mechanisms
@@ -105,7 +105,7 @@ inline ControlOutput<T> applyFallbackStrategy(
     return nmpc_optimal_u;
 }
 
-}  // namespace Solver
+}  // namespace solver
 }  // namespace Optimization
 
 #endif  // OPTIMIZATION_SOLVER_FALLBACK_CONTROL_HPP_
