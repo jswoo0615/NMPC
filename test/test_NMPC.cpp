@@ -12,7 +12,7 @@ using namespace Optimization;
 int main() {
     constexpr size_t Nx = 8;
     constexpr size_t Nu = 2;
-    constexpr size_t H = 30;
+    constexpr size_t H = 100;
     double dt = 0.05;
 
     Optimization::controller::SparseNMPC_IPM<H> nmpc;
@@ -44,7 +44,7 @@ int main() {
     x0(0) = 0.0;    // s
     x0(1) = 0.0;    // d
     x0(2) = 0.087;  // mu (약 5도 틀어짐)
-    x0(3) = 20.00;  // vx
+    x0(3) = 10.0;  // vx
 
     Dynamics::RealTimeDynamicsModel dynamics;
 
@@ -52,7 +52,7 @@ int main() {
     log_file << "step,s,d,mu,vx,delta,a\n";
 
     std::cout << "Starting Simulation...\n";
-    for (int step = 0; step < 1000; ++step) {
+    for (int step = 0; step < 100; ++step) {
         auto res = nmpc.solve_ipm(x0, config);
         
         matrix::StaticVector<double, Nu> u_opt;
@@ -65,7 +65,8 @@ int main() {
         std::cout << std::setw(4) << step << " | "
                   << std::setw(7) << x0(0) << " | " << std::setw(7) << x0(1) << " | "
                   << std::setw(7) << x0(2) << " | " << std::setw(7) << x0(3) << " || "
-                  << std::setw(10) << u_opt(0) << " | " << std::setw(10) << u_opt(1) << "\n";
+                  << std::setw(10) << u_opt(0) << " | " << std::setw(10) << u_opt(1) << " | "
+                  << res.status_msg << " (KKT: " << res.max_kkt_error << ")\n";
 
         log_file << step << "," << x0(0) << "," << x0(1) << "," << x0(2) << ","
                  << x0(3) << "," << u_opt(0) << "," << u_opt(1) << "\n";

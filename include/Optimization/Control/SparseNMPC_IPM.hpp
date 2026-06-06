@@ -60,10 +60,10 @@ struct NMPCTuningConfig {
     double R_Steer_Rate = 50000.0;
     double R_Accel_Rate = 100.0;
 
-    double Obstacle_Penalty = 20000.0;
+    double Obstacle_Penalty = 20000.0; // Not used in Hard PD-IPM, but kept for interface compatibility
     double Obstacle_Margin = 1.5;
 
-    double W_slack = 100000.0;
+    double W_slack = 100000.0; // Not used in Hard PD-IPM
 
     double damping_Q = 5.0;
     double damping_R = 500.0;
@@ -85,9 +85,25 @@ struct NMPCTuningConfig {
 template <size_t H, typename PlantModel = Dynamics::RealTimeDynamicsModel, size_t Nx = 8, size_t Nu = 2>
 class SparseNMPC_IPM {
    public:
+    struct ConstraintState {
+        double s = 1.0;
+        double lam = 1.0;
+        double ds = 0.0;
+        double dlam = 0.0;
+    };
+
+    struct IPMDuals {
+        ConstraintState d_max;
+        ConstraintState d_min;
+        ConstraintState u_max[2];
+        ConstraintState u_min[2];
+        ConstraintState obs[10];
+    };
+
     double dt;
     std::array<matrix::StaticVector<double, Nu>, H> U_guess;
     std::array<matrix::StaticVector<double, Nx>, H + 1> X_pred;
+    std::array<IPMDuals, H> duals;
     matrix::StaticVector<double, Nu> u_last;
 
     std::array<ObstacleFrenet, 10> obstacles;
@@ -98,7 +114,10 @@ class SparseNMPC_IPM {
 
     SparseNMPC_IPM() : dt(0.05), mu(1.0) {
         u_last.set_zero();
-        for (size_t k = 0; k < H; ++k) U_guess[k].set_zero();
+        for (size_t k = 0; k < H; ++k) {
+            U_guess[k].set_zero();
+            duals[k] = IPMDuals();
+        }
         for (auto& obs : obstacles) {
             obs.s = 10000.0;
             obs.d = 10000.0;
@@ -112,6 +131,7 @@ class SparseNMPC_IPM {
         for (size_t k = 0; k < H - 1; ++k) {
             U_guess[k] = U_guess[k + 1];
             X_pred[k] = X_pred[k + 1];
+            duals[k] = duals[k + 1];
         }
         X_pred[H - 1] = X_pred[H];
         U_guess[H - 1](0) *= 0.5;
@@ -139,7 +159,7 @@ class SparseNMPC_IPM {
     }
 
     double evaluate_merit(double alpha, const NMPCTuningConfig& config,
-                          const matrix::StaticVector<double, Nx>& x_init) {
+                          const matrix::StaticVector<double, Nx>& x_init, double current_mu) {
         double merit = 0.0;
         constexpr double L1_WEIGHT = 1000.0;
         PlantModel plant;
@@ -168,14 +188,23 @@ class SparseNMPC_IPM {
             merit += 0.5 * (config.R_Steer * u_cand(0) * u_cand(0) +
                             config.R_Accel * u_cand(1) * u_cand(1));
 
-            double violation_max = x_curr(1) - config.d_max;
-            double violation_min = config.d_min - x_curr(1);
-            
-            if (violation_max > 0.0) {
-                merit += 0.5 * config.W_slack * violation_max * violation_max;
-            }
-            if (violation_min > 0.0) {
-                merit += 0.5 * config.W_slack * violation_min * violation_min;
+            auto eval_barrier = [&](double c, double s, double ds) {
+                double s_cand = s + alpha * ds;
+                if (s_cand <= 1e-12) return 1e9;
+                return -current_mu * std::log(s_cand) + L1_WEIGHT * std::abs(c + s_cand);
+            };
+
+            double c_d_max = x_curr(1) - config.d_max;
+            merit += eval_barrier(c_d_max, duals[k].d_max.s, duals[k].d_max.ds);
+
+            double c_d_min = config.d_min - x_curr(1);
+            merit += eval_barrier(c_d_min, duals[k].d_min.s, duals[k].d_min.ds);
+
+            for (size_t i = 0; i < 2; ++i) {
+                double c_u_max = u_cand(i) - config.u_max[i];
+                merit += eval_barrier(c_u_max, duals[k].u_max[i].s, duals[k].u_max[i].ds);
+                double c_u_min = config.u_min[i] - u_cand(i);
+                merit += eval_barrier(c_u_min, duals[k].u_min[i].s, duals[k].u_min[i].ds);
             }
 
             double time_future = k * dt;
@@ -185,17 +214,15 @@ class SparseNMPC_IPM {
                 double ds = x_curr(0) - obs_pred_s;
                 double dd = x_curr(1) - obs_pred_d;
                 
-                // Symmetry breaking to push it laterally early
                 double dd_eff = dd;
                 if (std::abs(dd_eff) < 0.1) dd_eff = (dd_eff >= 0 ? 0.1 : -0.1);
                 
-                double dist_sq = ds * ds + dd_eff * dd_eff;
+                double ds_scaled = ds * 0.5;
+                double dist_sq = ds_scaled * ds_scaled + dd_eff * dd_eff;
                 double safety_margin = obstacles[i].r + config.Obstacle_Margin;
-                double violation = safety_margin * safety_margin - dist_sq;
+                double c_obs = safety_margin * safety_margin - dist_sq;
                 
-                if (violation > 0.0) {
-                    merit += config.Obstacle_Penalty * violation * violation;
-                }
+                merit += eval_barrier(c_obs, duals[k].obs[i].s, duals[k].obs[i].ds);
             }
 
             matrix::StaticVector<double, Nx> x_sim =
@@ -221,12 +248,43 @@ class SparseNMPC_IPM {
         X_pred[0] = x_curr;
         X_pred[0](3) = MathTraits<double>::max(0.1, x_curr(3));
         
-        // Initial Rollout to ensure dynamically feasible initial guess
+        mu = 1.0;
+
         for (size_t k = 0; k < H; ++k) {
             X_pred[k + 1] = integrator::step_rk4<Nx, Nu, PlantModel, double>(model, X_pred[k], U_guess[k], dt);
-        }
+            
+            double d_val = X_pred[k](1);
+            auto init_dual = [&](double c, ConstraintState& cs) {
+                cs.s = MathTraits<double>::max(cs.s, MathTraits<double>::max(0.1, -c));
+                cs.lam = mu / cs.s;
+            };
 
-        mu = 1.0;
+            init_dual(d_val - config.d_max, duals[k].d_max);
+            init_dual(config.d_min - d_val, duals[k].d_min);
+
+            for (size_t i = 0; i < 2; ++i) {
+                init_dual(U_guess[k](i) - config.u_max[i], duals[k].u_max[i]);
+                init_dual(config.u_min[i] - U_guess[k](i), duals[k].u_min[i]);
+            }
+
+            double time_future = k * dt;
+            for (size_t i = 0; i < 10; ++i) {
+                double obs_pred_s = obstacles[i].s + obstacles[i].vs * time_future;
+                double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
+                double ds = X_pred[k](0) - obs_pred_s;
+                double dd = d_val - obs_pred_d;
+                
+                double dd_eff = dd;
+                if (std::abs(dd_eff) < 0.1) dd_eff = (dd_eff >= 0 ? 0.1 : -0.1);
+                
+                double ds_scaled = ds * 0.5; 
+                double dist_sq = ds_scaled * ds_scaled + dd_eff * dd_eff;
+                double safety_margin = obstacles[i].r + config.Obstacle_Margin;
+                double c_obs = safety_margin * safety_margin - dist_sq;
+                
+                init_dual(c_obs, duals[k].obs[i]);
+            }
+        }
 
         for (int ipm_step = 0; ipm_step < config.ipm_max_iter; ++ipm_step) {
             result.sqp_iterations++;
@@ -247,20 +305,20 @@ class SparseNMPC_IPM {
                         integrator::step_rk4<Nx, Nu, PlantModel, ADVar>(model, x_dual, u_dual, dt);
 
                     for (size_t j = 0; j < Nx; ++j) {
-                        for (size_t i = 0; i < Nx; ++i) {
-                            riccati.A[k](i, j) = x_next_dual(i).g[j];
-                        }
+                        for (size_t i = 0; i < Nx; ++i) riccati.A[k](i, j) = x_next_dual(i).g[j];
                     }
                     for (size_t j = 0; j < Nu; ++j) {
-                        for (size_t i = 0; i < Nx; ++i) {
-                            riccati.B[k](i, j) = x_next_dual(i).g[Nx + j];
-                        }
+                        for (size_t i = 0; i < Nx; ++i) riccati.B[k](i, j) = x_next_dual(i).g[Nx + j];
                     }
                     for (size_t i = 0; i < Nx; ++i) {
                         riccati.d[k](i) = x_next_dual(i).v - X_pred[k + 1](i);
                     }
                 }
             }
+
+            double gap_sum = 0.0;
+            int num_constraints = 0;
+
             for (size_t k = 0; k < H; ++k) {
                 riccati.Q[k].set_zero();
                 riccati.R[k].set_zero();
@@ -293,17 +351,29 @@ class SparseNMPC_IPM {
                 riccati.R[k](1, 1) = config.R_Accel;
                 riccati.r[k](1) = config.R_Accel * U_guess[k](1);
 
-                double violation_max = d_val - config.d_max;
-                double violation_min = config.d_min - d_val;
+                auto apply_condensed = [&](double c, double J_x0, double J_x1, double J_u0, double J_u1, ConstraintState& cs) {
+                    double J_term = (mu + cs.lam * c) / cs.s;
+                    double H_term = cs.lam / cs.s;
+                    
+                    if (J_x0 != 0.0) { riccati.q[k](0) += J_x0 * J_term; riccati.Q[k](0,0) += J_x0 * J_x0 * H_term; }
+                    if (J_x1 != 0.0) { riccati.q[k](1) += J_x1 * J_term; riccati.Q[k](1,1) += J_x1 * J_x1 * H_term; }
+                    if (J_x0 != 0.0 && J_x1 != 0.0) {
+                        riccati.Q[k](0,1) += J_x0 * J_x1 * H_term;
+                        riccati.Q[k](1,0) += J_x1 * J_x0 * H_term;
+                    }
+                    if (J_u0 != 0.0) { riccati.r[k](0) += J_u0 * J_term; riccati.R[k](0,0) += J_u0 * J_u0 * H_term; }
+                    if (J_u1 != 0.0) { riccati.r[k](1) += J_u1 * J_term; riccati.R[k](1,1) += J_u1 * J_u1 * H_term; }
 
-                if (violation_max > 0.0) {
-                    riccati.q[k](1) += config.W_slack * violation_max;
-                    riccati.Q[k](1, 1) += config.W_slack;
-                }
-                
-                if (violation_min > 0.0) {
-                    riccati.q[k](1) -= config.W_slack * violation_min;
-                    riccati.Q[k](1, 1) += config.W_slack;
+                    gap_sum += cs.s * cs.lam;
+                    num_constraints++;
+                };
+
+                apply_condensed(d_val - config.d_max, 0.0, 1.0, 0.0, 0.0, duals[k].d_max);
+                apply_condensed(config.d_min - d_val, 0.0, -1.0, 0.0, 0.0, duals[k].d_min);
+
+                for (size_t i = 0; i < 2; ++i) {
+                    apply_condensed(U_guess[k](i) - config.u_max[i], 0.0, 0.0, i==0?1.0:0.0, i==1?1.0:0.0, duals[k].u_max[i]);
+                    apply_condensed(config.u_min[i] - U_guess[k](i), 0.0, 0.0, i==0?-1.0:0.0, i==1?-1.0:0.0, duals[k].u_min[i]);
                 }
 
                 double time_future = k * dt;
@@ -313,28 +383,14 @@ class SparseNMPC_IPM {
                     double ds = X_pred[k](0) - obs_pred_s;
                     double dd = d_val - obs_pred_d;
                     
-                    // Symmetry breaking to prevent local minima (U-turns) when directly in front
                     double dd_eff = dd;
                     if (std::abs(dd_eff) < 0.1) dd_eff = (dd_eff >= 0 ? 0.1 : -0.1);
                     
-                    // Elliptical obstacle influence: stretch longitudinally by a factor of 2.0
                     double ds_scaled = ds * 0.5; 
                     double dist_sq = ds_scaled * ds_scaled + dd_eff * dd_eff;
                     double safety_margin = obstacles[i].r + config.Obstacle_Margin;
-                    double violation = safety_margin * safety_margin - dist_sq;
 
-                    if (violation > 0.0) {
-                        double J_s = -2.0 * ds_scaled * 0.5; // Chain rule for ds_scaled^2 w.r.t s
-                        double J_d = -2.0 * dd_eff;          // Gradient uses dd_eff
-
-                        riccati.q[k](0) += config.Obstacle_Penalty * violation * J_s;
-                        riccati.q[k](1) += config.Obstacle_Penalty * violation * J_d;
-
-                        riccati.Q[k](0, 0) += config.Obstacle_Penalty * J_s * J_s;
-                        riccati.Q[k](0, 1) += config.Obstacle_Penalty * J_s * J_d;
-                        riccati.Q[k](1, 0) += config.Obstacle_Penalty * J_d * J_s;
-                        riccati.Q[k](1, 1) += config.Obstacle_Penalty * J_d * J_d;
-                    }
+                    apply_condensed(safety_margin * safety_margin - dist_sq, -2.0 * ds_scaled * 0.5, -2.0 * dd_eff, 0.0, 0.0, duals[k].obs[i]);
                 }
 
                 for (size_t i = 0; i < Nx; ++i) riccati.Q[k](i, i) += config.damping_Q;
@@ -354,21 +410,84 @@ class SparseNMPC_IPM {
                 return execute_fallback(result, "Riccati Factorization Failed", config);
             }
 
-            double current_merit = evaluate_merit(0.0, config, x_curr);
-            auto merit_evaluator = [&](double alpha) {
-                return evaluate_merit(alpha, config, x_curr);
-            };
-            double optimal_alpha = solver::MeritLineSearch::run(merit_evaluator, current_merit);
+            double alpha_max = 1.0;
+            constexpr double tau = 0.995;
 
             matrix::StaticVector<double, H * Nu> du_vec;
+
+            for (size_t k = 0; k < H; ++k) {
+                auto extract_dual = [&](double c, double J_x0, double J_x1, double J_u0, double J_u1, ConstraintState& cs) {
+                    double dz = J_x0 * riccati.dx[k](0) + J_x1 * riccati.dx[k](1) + 
+                                J_u0 * riccati.du[k](0) + J_u1 * riccati.du[k](1);
+                    cs.ds = -c - cs.s - dz;
+                    cs.dlam = (mu - cs.lam * cs.s - cs.lam * cs.ds) / cs.s;
+
+                    if (cs.ds < 0.0) alpha_max = std::min(alpha_max, -tau * cs.s / cs.ds);
+                    if (cs.dlam < 0.0) alpha_max = std::min(alpha_max, -tau * cs.lam / cs.dlam);
+                };
+
+                double d_val = X_pred[k](1);
+                
+                extract_dual(d_val - config.d_max, 0.0, 1.0, 0.0, 0.0, duals[k].d_max);
+                extract_dual(config.d_min - d_val, 0.0, -1.0, 0.0, 0.0, duals[k].d_min);
+
+                for (size_t i = 0; i < 2; ++i) {
+                    extract_dual(U_guess[k](i) - config.u_max[i], 0.0, 0.0, i==0?1.0:0.0, i==1?1.0:0.0, duals[k].u_max[i]);
+                    extract_dual(config.u_min[i] - U_guess[k](i), 0.0, 0.0, i==0?-1.0:0.0, i==1?-1.0:0.0, duals[k].u_min[i]);
+                }
+
+                double time_future = k * dt;
+                for (size_t i = 0; i < 10; ++i) {
+                    double obs_pred_s = obstacles[i].s + obstacles[i].vs * time_future;
+                    double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
+                    double ds = X_pred[k](0) - obs_pred_s;
+                    double dd = d_val - obs_pred_d;
+                    
+                    double dd_eff = dd;
+                    if (std::abs(dd_eff) < 0.1) dd_eff = (dd_eff >= 0 ? 0.1 : -0.1);
+                    
+                    double ds_scaled = ds * 0.5; 
+                    double dist_sq = ds_scaled * ds_scaled + dd_eff * dd_eff;
+                    double safety_margin = obstacles[i].r + config.Obstacle_Margin;
+                    
+                    extract_dual(safety_margin * safety_margin - dist_sq, -2.0 * ds_scaled * 0.5, -2.0 * dd_eff, 0.0, 0.0, duals[k].obs[i]);
+                }
+
+                for (size_t i = 0; i < Nu; ++i) {
+                    du_vec(k * Nu + i) = riccati.du[k](i);
+                }
+            }
+
+            double current_merit = evaluate_merit(0.0, config, x_curr, mu);
+            auto merit_evaluator = [&](double alpha) {
+                return evaluate_merit(alpha, config, x_curr, mu);
+            };
+
+            // Limit line search to alpha_max
+            double optimal_alpha = alpha_max;
+            for (int ls = 0; ls < 10; ++ls) {
+                double trial_merit = merit_evaluator(optimal_alpha);
+                // Armijo condition
+                if (trial_merit <= current_merit + 1e-4) {
+                    break;
+                }
+                optimal_alpha *= 0.5;
+            }
+
             for (size_t k = 0; k < H; ++k) {
                 X_pred[k].saxpy(optimal_alpha, riccati.dx[k]);
                 for (size_t i = 0; i < Nu; ++i) {
-                    double step_u = optimal_alpha * riccati.du[k](i);
-                    U_guess[k](i) =
-                        std::clamp(U_guess[k](i) + step_u, config.u_min[i], config.u_max[i]);
-                    du_vec(k * Nu + i) = step_u;
+                    U_guess[k](i) += optimal_alpha * riccati.du[k](i);
                 }
+
+                auto update_dual = [&](ConstraintState& cs) {
+                    cs.s += optimal_alpha * cs.ds;
+                    cs.lam += optimal_alpha * cs.dlam;
+                };
+                update_dual(duals[k].d_max);
+                update_dual(duals[k].d_min);
+                for(int i=0; i<2; ++i) { update_dual(duals[k].u_max[i]); update_dual(duals[k].u_min[i]); }
+                for(int i=0; i<10; ++i) update_dual(duals[k].obs[i]);
             }
             X_pred[H].saxpy(optimal_alpha, riccati.dx[H]);
 
@@ -379,15 +498,10 @@ class SparseNMPC_IPM {
                 return execute_fallback(result, "KKT Divergence Detected", config);
             }
 
-            if (kkt_residual < config.kkt_tolerance * 2.0) {
-                mu = MathTraits<double>::max(1e-4, mu * 0.1);
-            } else if (kkt_residual < config.kkt_tolerance * 10.0) {
-                mu = MathTraits<double>::max(1e-3, mu * 0.2);
-            } else {
-                mu = MathTraits<double>::max(1e-2, mu * 0.5);
-            }
+            double average_gap = gap_sum / num_constraints;
+            mu = MathTraits<double>::max(1e-4, 0.2 * average_gap);
 
-            if (kkt_residual < config.kkt_tolerance && mu <= 1e-3) {
+            if (kkt_residual < config.kkt_tolerance && average_gap <= 1e-3) {
                 result.status_msg = "IPM Converged (Fast Exit)";
                 safe_buffer.commit(X_pred, U_guess);
                 break;
