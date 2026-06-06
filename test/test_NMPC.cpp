@@ -47,7 +47,7 @@ int main() {
     // [Architect's Update] 다중 원형 근사 전용 방벽 세팅
     // 장애물 반경(1.5m) + 차량 부분 반경(0.9m) + 마진(0.1m) = 2.5m
     // 대칭성을 깨기 위해 y축(d)에 0.01 오프셋 부여
-    nmpc.set_obstacle(25.0, 0.01, 2.5);
+    nmpc.set_obstacle(25.0, 0.005, 2.5);
 
     std::array<matrix::StaticVector<double, Nx>, H + 1> x_ref;
     for (size_t k = 0; k <= H; ++k) {
@@ -58,7 +58,7 @@ int main() {
 
     matrix::StaticVector<double, Nx> x0;
     x0.set_zero();
-    x0(0) = 0.0;    x0(1) = 0.0;    x0(2) = 0.087;  x0(3) = 10.0;   
+    x0(0) = 0.0;    x0(1) = 0.0;    x0(2) = 0.087;  x0(3) = 20.00;   
 
     std::ofstream log_file("nmpc_obstacle_avoidance.csv");
     if (!log_file.is_open()) return -1;
