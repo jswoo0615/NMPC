@@ -177,7 +177,7 @@ namespace Optimization {
                     #endif
 
                     for (; i < size; ++i) {
-                        data_[i] = scalar * rhs.data_[i];
+                        data_[i] += scalar * rhs.data_[i];
                     }
                     return *this;
                 }
