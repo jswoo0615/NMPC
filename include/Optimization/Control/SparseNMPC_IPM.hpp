@@ -190,7 +190,7 @@ class SparseNMPC_IPM {
 
             auto eval_barrier = [&](double c, double s, double ds) {
                 double s_cand = s + alpha * ds;
-                if (s_cand <= 1e-12) return 1e9;
+                if (s_cand <= 1e-8) s_cand = 1e-8; 
                 return -current_mu * std::log(s_cand) + L1_WEIGHT * std::abs(c + s_cand);
             };
 
@@ -210,8 +210,11 @@ class SparseNMPC_IPM {
             double time_future = k * dt;
             for (size_t i = 0; i < 10; ++i) {
                 double obs_pred_s = obstacles[i].s + obstacles[i].vs * time_future;
-                double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
                 double ds = x_curr(0) - obs_pred_s;
+                
+                if (std::abs(ds) > 20.0) continue;
+
+                double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
                 double dd = x_curr(1) - obs_pred_d;
                 
                 double dd_eff = dd;
@@ -225,10 +228,9 @@ class SparseNMPC_IPM {
                 merit += eval_barrier(c_obs, duals[k].obs[i].s, duals[k].obs[i].ds);
             }
 
-            matrix::StaticVector<double, Nx> x_sim =
-                integrator::IntegratorEngine<Nx, Nu, PlantModel, double>::compute(
-                    plant, x_curr, u_cand, dt);
-            for (size_t i = 0; i < Nx; ++i) merit += L1_WEIGHT * std::abs(x_next(i) - x_sim(i));
+            for (size_t i = 0; i < Nx; ++i) {
+                merit += L1_WEIGHT * std::abs((1.0 - alpha) * riccati.d[k](i));
+            }
             x_curr = x_next;
         }
         return merit;
@@ -270,8 +272,11 @@ class SparseNMPC_IPM {
             double time_future = k * dt;
             for (size_t i = 0; i < 10; ++i) {
                 double obs_pred_s = obstacles[i].s + obstacles[i].vs * time_future;
-                double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
                 double ds = X_pred[k](0) - obs_pred_s;
+                
+                if (std::abs(ds) > 20.0) continue;
+
+                double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
                 double dd = d_val - obs_pred_d;
                 
                 double dd_eff = dd;
@@ -379,8 +384,11 @@ class SparseNMPC_IPM {
                 double time_future = k * dt;
                 for (size_t i = 0; i < 10; ++i) {
                     double obs_pred_s = obstacles[i].s + obstacles[i].vs * time_future;
-                    double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
                     double ds = X_pred[k](0) - obs_pred_s;
+                    
+                    if (std::abs(ds) > 20.0) continue;
+
+                    double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
                     double dd = d_val - obs_pred_d;
                     
                     double dd_eff = dd;
@@ -439,8 +447,11 @@ class SparseNMPC_IPM {
                 double time_future = k * dt;
                 for (size_t i = 0; i < 10; ++i) {
                     double obs_pred_s = obstacles[i].s + obstacles[i].vs * time_future;
-                    double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
                     double ds = X_pred[k](0) - obs_pred_s;
+                    
+                    if (std::abs(ds) > 20.0) continue;
+
+                    double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
                     double dd = d_val - obs_pred_d;
                     
                     double dd_eff = dd;
