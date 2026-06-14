@@ -165,8 +165,6 @@ namespace Optimization {
                                       const matrix::StaticVector<double, Nx>& x_init, double current_mu) {
                     double merit = 0.0;
                     constexpr double L1_WEIGHT = 1000.0;
-                    PlantModel plant;
-                    plant.kappa = config.kappa;
 
                     matrix::StaticVector<double, Nx> x_curr = X_pred[0];
                     x_curr.saxpy(alpha, riccati.dx[0]);
