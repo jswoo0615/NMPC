@@ -36,6 +36,7 @@ namespace Optimization {
             bool success = false;
             bool fallback_triggered = false;
             double max_kkt_error = 0.0;
+            double log10_final_merit = 0.0; // [C] 로그 스케일 디버깅 모니터링 지표 추가
             int sqp_iterations = 0;
             std::string status_msg = "OK";
         };
@@ -107,7 +108,6 @@ namespace Optimization {
                 double mu;
 
                 solver::RiccatiSolver<H, Nx, Nu> riccati;
-
                 SafeBuffer<H, Nx, Nu> safe_buffer;
 
                 SparseNMPC_IPM() : dt(0.05), mu(1.0) {
@@ -163,8 +163,18 @@ namespace Optimization {
 
                 double evaluate_merit(double alpha, const NMPCTuningConfig& config,
                                       const matrix::StaticVector<double, Nx>& x_init, double current_mu) {
+                    
+                    // [A] 가중치 황금률 자동 강제 체계 구축
+                    // 하드코딩된 1000.0 대신 스테이지 코스트 최댓값의 최소 10배 이상을 동적으로 보장
+                    const double max_stage_weight = std::max({
+                        config.Q_D, config.Q_mu, config.Q_Vx, config.Q_Vy, config.Q_r,
+                        config.Q_alpha_f, config.Q_alpha_r, config.R_Steer, config.R_Accel
+                    });
+                    const double L1_WEIGHT = std::max(1000.0, 10.0 * max_stage_weight);
+
                     double merit = 0.0;
-                    constexpr double L1_WEIGHT = 1000.0;
+                    
+                    // PlantModel 관련 파현 도려냄 (Dead Code 제거 완료)
 
                     matrix::StaticVector<double, Nx> x_curr = X_pred[0];
                     x_curr.saxpy(alpha, riccati.dx[0]);
@@ -240,6 +250,7 @@ namespace Optimization {
                     }
                     return merit;
                 }
+
                 NMPCResult solve_ipm(const matrix::StaticVector<double, Nx>& x_curr, const NMPCTuningConfig& config) {
                     NMPCResult result;
                     result.sqp_iterations = 0;
@@ -507,6 +518,12 @@ namespace Optimization {
                         }
 
                         double current_merit = evaluate_merit(0.0, config, x_curr, mu);
+                        
+                        // [B] 수치적 예외 처리 브레이크 배치
+                        if (std::isnan(current_merit) || std::isinf(current_merit)) {
+                            return execute_fallback(result, "Current Merit NaN/Inf Detected", config);
+                        }
+
                         auto merit_evaluator = [&](double alpha) {
                             return evaluate_merit(alpha, config, x_curr, mu);
                         };
@@ -515,8 +532,15 @@ namespace Optimization {
                         double optimal_alpha = alpha_max;
                         for (int ls = 0; ls < 10; ++ls) {
                             double trial_merit = merit_evaluator(optimal_alpha);
-                            // Armijo condition
-                            if (trial_merit <= current_merit + 1e-4) {
+                            
+                            if (std::isnan(trial_merit) || std::isinf(trial_merit)) {
+                                optimal_alpha *= 0.5;
+                                continue;
+                            }
+
+                            // [B] 수치 정밀도 저하(Round-off error) 방지를 위한 적응형 Armijo 임계값 도입
+                            double armijo_threshold = current_merit + 1e-4 * std::max(1.0, std::abs(current_merit));
+                            if (trial_merit <= armijo_threshold) {
                                 break;
                             }
                             optimal_alpha *= 0.5;
@@ -547,6 +571,9 @@ namespace Optimization {
 
                         double kkt_residual = Solver::KKTMonitor<H * Nu, 1>::fast_infinity_norm(du_vec);
                         result.max_kkt_error = kkt_residual;
+                        
+                        // [C] 로그 스케일 모니터링 값 업데이트 (수치 진동 및 발산 추적 유틸리티용)
+                        result.log10_final_merit = std::log10(std::max(1e-9, current_merit));
 
                         if (std::isnan(kkt_residual) || kkt_residual > 20.0) {
                             return execute_fallback(result, "KKT Divergence Detected", config);
@@ -572,7 +599,6 @@ namespace Optimization {
         }; 
 
     } // namespace controller
-
 } // namespace Optimization
 
 #endif // OPTIMIZATION_CONTROLLER_SPARSE_NMPC_IPM_HPP_
