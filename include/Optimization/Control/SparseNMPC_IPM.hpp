@@ -16,18 +16,9 @@
 #include "Optimization/Solver/MeritLineSearch.hpp"
 #include "Optimization/Solver/RiccatiSolver.hpp"
 #include "Optimization/Dynamics/RealTimeDynamicsModel.hpp"
+#include "Optimization/Utils/EnvironmentEvaluator.hpp" 
 
 namespace Optimization {
-    #ifndef OBSTACLE_FRENET_DEFINED
-    #define OBSTACLE_FRENET_DEFINED
-    struct ObstacleFrenet {
-        double s = 0.0;
-        double d = 0.0;
-        double r = 0.5;
-        double vs = 0.0;
-        double vd = 0.0;
-    };
-    #endif // OBSTACLE_FRENET_DEFINED
 
     namespace controller {
         #ifndef NMPC_RESULT_DEFINED
@@ -36,7 +27,7 @@ namespace Optimization {
             bool success = false;
             bool fallback_triggered = false;
             double max_kkt_error = 0.0;
-            double log10_final_merit = 0.0; // [C] 로그 스케일 디버깅 모니터링 지표 추가
+            double log10_final_merit = 0.0; 
             int sqp_iterations = 0;
             std::string status_msg = "OK";
         };
@@ -59,10 +50,10 @@ namespace Optimization {
             double R_Steer_Rate = 50000.0;
             double R_Accel_Rate = 100.0;
 
-            double Obstacle_Penalty = 20000.0;  // Not used in Hard PD-IPM, but kept for interface compatibility
+            double Obstacle_Penalty = 20000.0;  
             double Obstacle_Margin = 1.5;
 
-            double W_slack = 100000.0;          // Not used in Hard PD-IPM
+            double W_slack = 100000.0;          
 
             double damping_Q = 5.0;
             double damping_R = 500.0;
@@ -74,14 +65,15 @@ namespace Optimization {
 
             double kappa = 0.0;
             double target_vx = 10.0;
-            double target_d[100] = {0.0};
+            // [Architect Correction] H=100일 때의 Out of Bounds 에러 방지를 위해 넉넉한 버퍼 확보
+            double target_d[200] = {0.0};
 
             int ipm_max_iter = 8;
             double kkt_tolerance = 1e-2;
         };
         #endif // NMPC_TUNING_CONFIG_DEFINED
 
-        template <std::size_t H, typename PlantModel = Dynamics::RealTimeDynamicsModel, std::size_t Nx = 8, std::size_t Nu = 2>
+        template <std::size_t H, typename PlantModel = Dynamics::RealTimeDynamicsModel, std::size_t Nx_mem = 8, std::size_t Nx_active = 6, std::size_t Nu = 2>
         class SparseNMPC_IPM {
             public:
                 struct ConstraintState {
@@ -100,28 +92,23 @@ namespace Optimization {
 
                 double dt;
                 std::array<matrix::StaticVector<double, Nu>, H> U_guess;
-                std::array<matrix::StaticVector<double, Nx>, H + 1> X_pred;
+                std::array<matrix::StaticVector<double, Nx_mem>, H + 1> X_pred;
                 std::array<IPMDuals, H> duals;
                 matrix::StaticVector<double, Nu> u_last;
 
-                std::array<ObstacleFrenet, 10> obstacles;
                 double mu;
 
-                solver::RiccatiSolver<H, Nx, Nu> riccati;
-                SafeBuffer<H, Nx, Nu> safe_buffer;
+                Evaluator::EnvironmentEvaluator<Nx_active, 10> env_evaluator;
+
+                solver::RiccatiSolver<H, Nx_active, Nu> riccati;
+                
+                SafeTrajectoryBuffer<H, Nx_mem, Nu> safe_buffer;
 
                 SparseNMPC_IPM() : dt(0.05), mu(1.0) {
                     u_last.set_zero();
                     for (std::size_t k = 0; k < H; ++k) {
                         U_guess[k].set_zero();
                         duals[k] = IPMDuals();
-                    }
-                    for (auto& obs : obstacles) {
-                        obs.s = 10000.0;
-                        obs.d = 10000.0;
-                        obs.r = 0.1;
-                        obs.vs = 0.0;
-                        obs.vd = 0.0;
                     }
                 }
 
@@ -136,7 +123,7 @@ namespace Optimization {
                     U_guess[H - 1](1) *= 0.5;
 
                     PlantModel model;
-                    X_pred[H] = integrator::step_rk4<Nx, Nu, PlantModel, double>(model, X_pred[H - 1], U_guess[H - 1], dt);
+                    X_pred[H] = integrator::step_rk4<Nx_mem, Nu, PlantModel, double>(model, X_pred[H - 1], U_guess[H - 1], dt);
                 }
 
                 inline NMPCResult execute_fallback(NMPCResult& res, const std::string& reason, const NMPCTuningConfig& config) {
@@ -144,7 +131,7 @@ namespace Optimization {
                     res.fallback_triggered = true;
                     res.status_msg = "IPM Fallback : " + reason;
 
-                    matrix::StaticVector<double, Nu> safe_u = safe_buffer.extract_fallback_control(config.u_min[1]);
+                    matrix::StaticVector<double, Nu> safe_u = safe_buffer.generate_fallback_control(config.u_min[1]);
                     if (safe_buffer.has_valid_trajectory) {
                         for (std::size_t k = 0; k < H; ++k) {
                             U_guess[k] = safe_buffer.U_safe[k];
@@ -162,10 +149,8 @@ namespace Optimization {
                 }
 
                 double evaluate_merit(double alpha, const NMPCTuningConfig& config,
-                                      const matrix::StaticVector<double, Nx>& x_init, double current_mu) {
+                                      const matrix::StaticVector<double, Nx_mem>& x_init, double current_mu) {
                     
-                    // [A] 가중치 황금률 자동 강제 체계 구축
-                    // 하드코딩된 1000.0 대신 스테이지 코스트 최댓값의 최소 10배 이상을 동적으로 보장
                     const double max_stage_weight = std::max({
                         config.Q_D, config.Q_mu, config.Q_Vx, config.Q_Vy, config.Q_r,
                         config.Q_alpha_f, config.Q_alpha_r, config.R_Steer, config.R_Accel
@@ -174,19 +159,21 @@ namespace Optimization {
 
                     double merit = 0.0;
                     
-                    // PlantModel 관련 파현 도려냄 (Dead Code 제거 완료)
-
-                    matrix::StaticVector<double, Nx> x_curr = X_pred[0];
-                    x_curr.saxpy(alpha, riccati.dx[0]);
-                    for (std::size_t i = 0; i < Nx; ++i) {
+                    matrix::StaticVector<double, Nx_mem> x_curr = X_pred[0];
+                    
+                    for (std::size_t i = 0; i < Nx_active; ++i) {
+                        x_curr(i) += alpha * riccati.dx[0](i);
                         merit += L1_WEIGHT * std::abs(x_curr(i) - x_init(i));
                     }
 
                     for (std::size_t k = 0; k < H; ++k) {
                         matrix::StaticVector<double, Nu> u_cand = U_guess[k];
                         u_cand.saxpy(alpha, riccati.du[k]);
-                        matrix::StaticVector<double, Nx> x_next = X_pred[k + 1];
-                        x_next.saxpy(alpha, riccati.dx[k + 1]);
+                        
+                        matrix::StaticVector<double, Nx_mem> x_next = X_pred[k + 1];
+                        for (std::size_t i = 0; i < Nx_active; ++i) {
+                            x_next(i) += alpha * riccati.dx[k + 1](i);
+                        }
 
                         double err_d = x_curr(1) - config.target_d[k];
                         double err_mu = x_curr(2);
@@ -199,6 +186,7 @@ namespace Optimization {
                         merit += 0.5 * (config.Q_alpha_r * x_curr(7) * x_curr(7));
 
                         merit += 0.5 * (config.R_Steer * u_cand(0) * u_cand(0) + config.R_Accel * u_cand(1) * u_cand(1));
+                        
                         auto eval_barrier = [&](double c, double s, double ds) {
                             double s_cand = s + alpha * ds;
                             if (s_cand <= 1e-8) {
@@ -221,29 +209,14 @@ namespace Optimization {
                         }
 
                         double time_future = k * dt;
+                        auto obs_grads = env_evaluator.evaluate_obstacles(x_curr(0), x_curr(1), time_future);
+                        
                         for (std::size_t i = 0; i < 10; ++i) {
-                            double obs_pred_s = obstacles[i].s + obstacles[i].vs * time_future;
-                            double ds = x_curr(0) - obs_pred_s;
-
-                            if (std::abs(ds) > 20.0) {
-                                continue;
-                            }
-                            double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
-                            double dd = x_curr(1) - obs_pred_d;
-
-                            double dd_eff = dd;
-                            if (std::abs(dd_eff) < 0.1) {
-                                dd_eff = (dd_eff >= 0 ? 0.1 : -0.1);
-                            }
-                            double ds_scaled = ds * 0.5;
-                            double dist_sq = ds_scaled * ds_scaled + dd_eff * dd_eff;
-                            double safety_margin = obstacles[i].r + config.Obstacle_Margin;
-                            double c_obs = safety_margin * safety_margin - dist_sq;
-
-                            merit += eval_barrier(c_obs, duals[k].obs[i].s, duals[k].obs[i].ds);
+                            if (!obs_grads[i].is_active) continue;
+                            merit += eval_barrier(obs_grads[i].c_val, duals[k].obs[i].s, duals[k].obs[i].ds);
                         }
 
-                        for (std::size_t i = 0; i < Nx; ++i) {
+                        for (std::size_t i = 0; i < Nx_active; ++i) {
                             merit += L1_WEIGHT * std::abs((1.0 - alpha) * riccati.d[k](i));
                         }
                         x_curr = x_next;
@@ -251,7 +224,7 @@ namespace Optimization {
                     return merit;
                 }
 
-                NMPCResult solve_ipm(const matrix::StaticVector<double, Nx>& x_curr, const NMPCTuningConfig& config) {
+                NMPCResult solve_ipm(const matrix::StaticVector<double, Nx_mem>& x_curr, const NMPCTuningConfig& config) {
                     NMPCResult result;
                     result.sqp_iterations = 0;
 
@@ -260,6 +233,8 @@ namespace Optimization {
                     }
                     PlantModel model;
                     model.kappa = config.kappa;
+                    
+                    env_evaluator.obstacle_margin = config.Obstacle_Margin;
 
                     X_pred[0] = x_curr;
                     X_pred[0](3) = MathTraits<double>::max(0.1, x_curr(3));
@@ -267,7 +242,7 @@ namespace Optimization {
                     mu = 1.0;
 
                     for (std::size_t k = 0; k < H; ++k) {
-                        X_pred[k + 1] = integrator::step_rk4<Nx, Nu, PlantModel, double>(model, X_pred[k], U_guess[k], dt);
+                        X_pred[k + 1] = integrator::step_rk4<Nx_mem, Nu, PlantModel, double>(model, X_pred[k], U_guess[k], dt);
                         double d_val = X_pred[k](1);
                         auto init_dual = [&](double c, ConstraintState& cs) {
                             cs.s = MathTraits<double>::max(cs.s, MathTraits<double>::max(0.1, -c));
@@ -281,28 +256,13 @@ namespace Optimization {
                             init_dual(U_guess[k](i) - config.u_max[i], duals[k].u_max[i]);
                             init_dual(config.u_min[i] - U_guess[k](i), duals[k].u_min[i]);
                         }
+                        
                         double time_future = k * dt;
+                        auto obs_grads = env_evaluator.evaluate_obstacles(X_pred[k](0), d_val, time_future);
+                        
                         for (std::size_t i = 0; i < 10; ++i) {
-                            double obs_pred_s = obstacles[i].s + obstacles[i].vs * time_future;
-                            double ds = X_pred[k](0) - obs_pred_s;
-
-                            if (std::abs(ds) > 20.0) {
-                                continue;
-                            }
-
-                            double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
-                            double dd = d_val - obs_pred_d;
-
-                            double dd_eff = dd;
-                            if (std::abs(dd_eff) < 0.1) {
-                                dd_eff = (dd_eff >= 0 ? 0.1 : -0.1);
-                            }
-                            double ds_scaled = ds * 0.5;
-                            double dist_sq = ds_scaled * ds_scaled + dd_eff * dd_eff;
-                            double safety_margin = obstacles[i].r + config.Obstacle_Margin;
-                            double c_obs = safety_margin * safety_margin - dist_sq;
-
-                            init_dual(c_obs, duals[k].obs[i]);
+                            if (!obs_grads[i].is_active) continue;
+                            init_dual(obs_grads[i].c_val, duals[k].obs[i]);
                         }
                     }
 
@@ -312,32 +272,44 @@ namespace Optimization {
                         bool update_jacobian = (ipm_step % 2 == 0);
 
                         if (update_jacobian) {
-                            using ADVar = matrix::DualVec<double, Nx + Nu>;
+                            // Dual 변수의 미분 추적 개수는 활성 상태(6) + 제어 입력(2) = 총 8개
+                            using ADVar = matrix::DualVec<double, Nx_active + Nu>;
                             for (std::size_t k = 0; k < H; ++k) {
-                                matrix::StaticVector<ADVar, Nx> x_dual;
+                                // [Architect Correction] 적분기와 동역학 모델 템플릿 매칭을 위해 크기를 Nx_mem(8)으로 일치시킴
+                                matrix::StaticVector<ADVar, Nx_mem> x_dual;
                                 matrix::StaticVector<ADVar, Nu> u_dual;
 
-                                for (std::size_t i = 0; i < Nx; ++i) {
+                                // 1. 앞의 6개 변수는 미분 그래디언트를 추적함
+                                for (std::size_t i = 0; i < Nx_active; ++i) {
                                     x_dual(i) = ADVar::make_variable(X_pred[k](i), i);
                                 }
+                                // 2. 뒤의 2개 예약 변수는 단순 값(v)만 복사하고 미분값은 상수(0.0) 취급
+                                for (std::size_t i = Nx_active; i < Nx_mem; ++i) {
+                                    x_dual(i) = ADVar();
+                                    x_dual(i).v = X_pred[k](i);
+                                }
+                                // 3. 제어 입력 2개는 인덱스 추적을 이어서(Nx_active ~) 부여함
                                 for (std::size_t i = 0; i < Nu; ++i) {
-                                    u_dual(i) = ADVar::make_variable(U_guess[k](i), Nx + i);    
+                                    u_dual(i) = ADVar::make_variable(U_guess[k](i), Nx_active + i);    
                                 }
 
-                                matrix::StaticVector<ADVar, Nx> x_next_dual = integrator::step_rk4<Nx, Nu, PlantModel, ADVar>(model, x_dual, u_dual, dt);
+                                // теперь 8칸 메모리 배열이 들어오므로 PlantModel(8칸) 컴파일러 에러가 사라집니다.
+                                matrix::StaticVector<ADVar, Nx_mem> x_next_dual = 
+                                    integrator::step_rk4<Nx_mem, Nu, PlantModel, ADVar>(model, x_dual, u_dual, dt);
 
-                                for (std::size_t j = 0; j < Nx; ++j) {
-                                    for (std::size_t i = 0; i < Nx; ++i) {
+                                // KKT 행렬 추출은 철저하게 앞의 Nx_active(6) 개수만 뽑아냅니다.
+                                for (std::size_t j = 0; j < Nx_active; ++j) {
+                                    for (std::size_t i = 0; i < Nx_active; ++i) {
                                         riccati.A[k](i, j) = x_next_dual(i).g[j];
                                     }
                                 }
                                 for (std::size_t j = 0; j < Nu; ++j) {
-                                    for (std::size_t i = 0; i < Nx; ++i) {
-                                        riccati.B[k](i, j) = x_next_dual(i).g[Nx + j];
+                                    for (std::size_t i = 0; i < Nx_active; ++i) {
+                                        riccati.B[k](i, j) = x_next_dual(i).g[Nx_active + j];
                                     }
                                 }
 
-                                for (std::size_t i = 0; i < Nx; ++i) {
+                                for (std::size_t i = 0; i < Nx_active; ++i) {
                                     riccati.d[k](i) = x_next_dual(i).v - X_pred[k + 1](i);
                                 }
                             }
@@ -368,11 +340,7 @@ namespace Optimization {
                             riccati.q[k](4) = config.Q_Vy * X_pred[k](4);
                             riccati.Q[k](5, 5) = config.Q_r;
                             riccati.q[k](5) = config.Q_r * X_pred[k](5);
-                            riccati.Q[k](6, 6) = config.Q_alpha_f;
-                            riccati.q[k](6) = config.Q_alpha_f * X_pred[k](6);
-                            riccati.Q[k](7, 7) = config.Q_alpha_r;
-                            riccati.q[k](7) = config.Q_alpha_r * X_pred[k](7);
-
+                            
                             riccati.R[k](0, 0) = config.R_Steer;
                             riccati.r[k](0) = config.R_Steer * U_guess[k](0);
                             riccati.R[k](1, 1) = config.R_Accel;
@@ -416,28 +384,20 @@ namespace Optimization {
                             }
 
                             double time_future = k * dt;
+                            auto obs_grads = env_evaluator.evaluate_obstacles(X_pred[k](0), d_val, time_future);
+                            
                             for (std::size_t i = 0; i < 10; ++i) {
-                                double obs_pred_s = obstacles[i].s + obstacles[i].vs * time_future;
-                                double ds = X_pred[k](0) - obs_pred_s;
-
-                                if (std::abs(ds) > 20.0) {
-                                    continue;
-                                }
-                                double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
-                                double dd = d_val - obs_pred_d;
-
-                                double dd_eff = dd;
-                                if (std::abs(dd_eff) < 0.1) {
-                                    dd_eff = (dd_eff >= 0 ? 0.1 : -0.1);
-                                }
-                                double ds_scaled = ds * 0.5;
-                                double dist_sq = ds_scaled * ds_scaled + dd_eff * dd_eff;
-                                double safety_margin = obstacles[i].r + config.Obstacle_Margin;
-
-                                apply_condensed(safety_margin * safety_margin - dist_sq, -2.0 * ds_scaled * 0.5, -2.0 * dd_eff, 0.0, 0.0, duals[k].obs[i]);
+                                if (!obs_grads[i].is_active) continue;
+                                apply_condensed(
+                                    obs_grads[i].c_val, 
+                                    obs_grads[i].J_x(0), 
+                                    obs_grads[i].J_x(1), 
+                                    0.0, 0.0, 
+                                    duals[k].obs[i]
+                                );
                             }
 
-                            for (std::size_t i = 0; i < Nx; ++i) {
+                            for (std::size_t i = 0; i < Nx_active; ++i) {
                                 riccati.Q[k](i, i) += config.damping_Q;
                             }
                             for (std::size_t i = 0; i < Nu; ++i) {
@@ -489,27 +449,17 @@ namespace Optimization {
                             }
 
                             double time_future = k * dt;
+                            auto obs_grads = env_evaluator.evaluate_obstacles(X_pred[k](0), d_val, time_future);
+                            
                             for (std::size_t i = 0; i < 10; ++i) {
-                                double obs_pred_s = obstacles[i].s + obstacles[i].vs * time_future;
-                                double ds = X_pred[k](0) - obs_pred_s;
-
-                                if (std::abs(ds) > 20.0) {
-                                    continue;
-                                }
-
-                                double obs_pred_d = obstacles[i].d + obstacles[i].vd * time_future;
-                                double dd = d_val - obs_pred_d;
-
-                                double dd_eff = dd;
-                                if (std::abs(dd_eff) < 0.1) {
-                                    dd_eff = (dd_eff >= 0 ? 0.1 : -0.1);
-                                }
-
-                                double ds_scaled = ds * 0.5;
-                                double dist_sq = ds_scaled * ds_scaled + dd_eff * dd_eff;
-                                double safety_margin = obstacles[i].r + config.Obstacle_Margin;
-
-                                extract_dual(safety_margin * safety_margin - dist_sq, -2.0 * ds_scaled * 0.5, -2.0 * dd_eff, 0.0, 0.0, duals[k].obs[i]);
+                                if (!obs_grads[i].is_active) continue;
+                                extract_dual(
+                                    obs_grads[i].c_val, 
+                                    obs_grads[i].J_x(0), 
+                                    obs_grads[i].J_x(1), 
+                                    0.0, 0.0, 
+                                    duals[k].obs[i]
+                                );
                             }
 
                             for (std::size_t i = 0; i < Nu; ++i) {
@@ -519,7 +469,6 @@ namespace Optimization {
 
                         double current_merit = evaluate_merit(0.0, config, x_curr, mu);
                         
-                        // [B] 수치적 예외 처리 브레이크 배치
                         if (std::isnan(current_merit) || std::isinf(current_merit)) {
                             return execute_fallback(result, "Current Merit NaN/Inf Detected", config);
                         }
@@ -528,7 +477,6 @@ namespace Optimization {
                             return evaluate_merit(alpha, config, x_curr, mu);
                         };
 
-                        // Limit line search to alpha_max
                         double optimal_alpha = alpha_max;
                         for (int ls = 0; ls < 10; ++ls) {
                             double trial_merit = merit_evaluator(optimal_alpha);
@@ -538,7 +486,6 @@ namespace Optimization {
                                 continue;
                             }
 
-                            // [B] 수치 정밀도 저하(Round-off error) 방지를 위한 적응형 Armijo 임계값 도입
                             double armijo_threshold = current_merit + 1e-4 * std::max(1.0, std::abs(current_merit));
                             if (trial_merit <= armijo_threshold) {
                                 break;
@@ -547,7 +494,9 @@ namespace Optimization {
                         }
 
                         for (std::size_t k = 0; k < H; ++k) {
-                            X_pred[k].saxpy(optimal_alpha, riccati.dx[k]);
+                            for (std::size_t i = 0; i < Nx_active; ++i) {
+                                X_pred[k](i) += optimal_alpha * riccati.dx[k](i);
+                            }
                             for (std::size_t i = 0; i < Nu; ++i) {
                                 U_guess[k](i) += optimal_alpha * riccati.du[k](i);
                             }
@@ -567,12 +516,12 @@ namespace Optimization {
                                 update_dual(duals[k].obs[i]);
                             }
                         }
-                        X_pred[H].saxpy(optimal_alpha, riccati.dx[H]);
+                        for (std::size_t i = 0; i < Nx_active; ++i) {
+                            X_pred[H](i) += optimal_alpha * riccati.dx[H](i);
+                        }
 
                         double kkt_residual = Solver::KKTMonitor<H * Nu, 1>::fast_infinity_norm(du_vec);
                         result.max_kkt_error = kkt_residual;
-                        
-                        // [C] 로그 스케일 모니터링 값 업데이트 (수치 진동 및 발산 추적 유틸리티용)
                         result.log10_final_merit = std::log10(std::max(1e-9, current_merit));
 
                         if (std::isnan(kkt_residual) || kkt_residual > 20.0) {
