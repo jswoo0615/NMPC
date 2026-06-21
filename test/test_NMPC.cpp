@@ -9,17 +9,22 @@
 #include "Optimization/Matrix/Core/StaticMatrix.hpp"
 #include "Optimization/Estimator/EKF.hpp"
 #include "Optimization/Estimator/SparseMHE.hpp"
+// [아키텍처 변경] 분리된 환경 평가 모듈 인클루드
+#include "Optimization/Utils/EnvironmentEvaluator.hpp"
 
 using namespace Optimization;
 
 int main() {
-    constexpr size_t Nx = 8;
+    // [아키텍처 변경] 메모리 차원(8)과 연산 차원(6)의 명확한 분리
+    constexpr size_t Nx_mem = 8;
+    constexpr size_t Nx_active = 6;
     constexpr size_t Nu = 2;
     constexpr size_t H = 100;
     constexpr size_t MHE_H = 10;
     double dt = 0.05;
 
-    Optimization::controller::SparseNMPC_IPM<H> nmpc;
+    // [아키텍처 변경] 분리된 템플릿 인자 주입
+    Optimization::controller::SparseNMPC_IPM<H, Dynamics::RealTimeDynamicsModel, Nx_mem, Nx_active, Nu> nmpc;
     nmpc.dt = dt;
 
     Optimization::controller::NMPCTuningConfig config;
@@ -38,13 +43,13 @@ int main() {
 
     config.Obstacle_Margin = 0.5; // 도로 경계(-3.5 ~ 3.5) 내에서 회피 가능하도록 마진 축소
 
-    // 장애물 설정
-    nmpc.obstacles[0].s = 25.0;
-    nmpc.obstacles[0].d = 0.005;
-    nmpc.obstacles[0].r = 2.5;
+    // [아키텍처 변경] 장애물 설정을 분리된 Evaluator를 통해 주입
+    nmpc.env_evaluator.obstacles[0].s = 25.0;
+    nmpc.env_evaluator.obstacles[0].d = 0.005;
+    nmpc.env_evaluator.obstacles[0].r = 2.5;
 
-    // 초기 상태 설정
-    matrix::StaticVector<double, Nx> x0;
+    // 초기 상태 설정 (물리적 차원은 여전히 8-DOF 유지)
+    matrix::StaticVector<double, Nx_mem> x0;
     x0.set_zero();
     x0(0) = 0.0;    // s
     x0(1) = 0.0;    // d
@@ -52,11 +57,11 @@ int main() {
     x0(3) = 10.0;   // vx
 
     // EKF 설정
-    Optimization::estimator::EKF<Nx, Nu> ekf;
+    Optimization::estimator::EKF<Nx_mem, Nu> ekf;
     ekf.x_est = x0;
 
     // SparseMHE 설정
-    Optimization::estimator::SparseMHE<MHE_H, Dynamics::RealTimeDynamicsModel, Nx, Nu, Nx> mhe;
+    Optimization::estimator::SparseMHE<MHE_H, Dynamics::RealTimeDynamicsModel, Nx_mem, Nu, Nx_mem> mhe;
     mhe.dt = dt;
 
     Dynamics::RealTimeDynamicsModel dynamics;
@@ -74,7 +79,7 @@ int main() {
     std::cout << "Starting Simulation with EKF/MHE Integration...\n";
     for (int step = 0; step < 100; ++step) {
         // 1. 센서 노이즈 생성 (가우시안 노이즈 추가)
-        matrix::StaticVector<double, Nx> z = x0;
+        matrix::StaticVector<double, Nx_mem> z = x0;
         z(0) += noise_s(gen);
         z(1) += noise_d(gen);
         z(2) += noise_mu(gen);
@@ -91,7 +96,7 @@ int main() {
         // MHE 업데이트
         mhe.Z_history.push(z);
         mhe.solve();
-        matrix::StaticVector<double, Nx> x_mhe = mhe.X_opt[MHE_H];
+        matrix::StaticVector<double, Nx_mem> x_mhe = mhe.X_opt[MHE_H];
 
         // 3. NMPC 제어 입력 계산 (EKF 추정치 기반)
         auto res = nmpc.solve_ipm(ekf.x_est, config);
@@ -117,7 +122,7 @@ int main() {
                  << u_opt(0) << "," << u_opt(1) << "\n";
 
         // 4. 실제 차량 물리 모델 상태 업데이트 (Integrator)
-        x0 = integrator::IntegratorEngine<Nx, Nu, Dynamics::RealTimeDynamicsModel, double>::compute(dynamics, x0, u_opt, dt);
+        x0 = integrator::IntegratorEngine<Nx_mem, Nu, Dynamics::RealTimeDynamicsModel, double>::compute(dynamics, x0, u_opt, dt);
 
         // Zero-Velocity Clamp (후진 방지)
         if (x0(3) < 0.0) {
