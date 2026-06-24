@@ -129,7 +129,7 @@ namespace Optimization {
                             for (; i + 3 < N; i += 4) {
                                 __m256d gy = _mm256_load_pd(&y.g[i]);
                                 __m256d gx = _mm256_load_pd(&x.g[i]);
-                                _m256_store_pd(&res.g[i], _mm256_mul_pd(_mm256_fmsub_pd(gy, v_xv, _mm256_mul_pd(v_yv, gx)), v_inv));
+                                _mm256_store_pd(&res.g[i], _mm256_mul_pd(_mm256_fmsub_pd(gy, v_xv, _mm256_mul_pd(v_yv, gx)), v_inv));
                             }
                         }
                     #endif

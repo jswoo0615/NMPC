@@ -207,7 +207,7 @@ namespace Optimization {
                             v_sum = _mm256_fmadd_pd(v_l, v_x, v_sum);
                         }
                         // 레지스터 내 수평적 덧셈 (Horizontal Add 적용)
-                        __m128d v_low = _mm256_caspd256_pd128(v_sum);
+                        __m128d v_low = _mm256_castpd256_pd128(v_sum);
                         __m128d v_high = _mm256_extractf128_pd(v_sum, 1);
                         v_low = _mm_add_pd(v_low, v_high);
                         v_low = _mm_hadd_pd(v_low, v_low);
