@@ -1,43 +1,57 @@
 cmake_minimum_required(VERSION 3.14)
-project(NMPC LANGUAGES CXX)
+project(nmpc_core_project LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-include(CheckLanguage)
-# Jetson Nano 등에서 nvcc가 PATH에 없을 경우를 대비해 존재하는지 확인 후 세팅
-if(EXISTS "/usr/local/cuda/bin/nvcc")
-    set(CMAKE_CUDA_COMPILER "/usr/local/cuda/bin/nvcc")
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
 endif()
-# nvcc가 내부적으로 호출할 호스트 컴파일러를 현재 CXX 컴파일러(g++-8)로 강제 동기화
-set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
-check_language(CUDA)
 
-add_executable(test_matrix_core test/test_matrix_core.cpp)
-target_include_directories(test_matrix_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-
-add_executable(test_dynamics test/test_dynamics.cpp)
-target_include_directories(test_dynamics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-
-add_executable(test_solver test/test_solver.cpp)
-target_include_directories(test_solver PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-
-add_executable(test_NMPC test/test_NMPC.cpp)
-target_include_directories(test_NMPC PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-
-add_executable(test_estimator test/test_estimator.cpp)
-target_include_directories(test_estimator PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+# ==============================================================================
+# [Dependency Resolution] 파이썬 C-API 호환성을 위한 최신 Pybind11 동적 Fetch
+# ==============================================================================
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 
 include(FetchContent)
 FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/archive/release-1.12.1.zip
+  pybind11
+  GIT_REPOSITORY https://github.com/pybind/pybind11.git
+  GIT_TAG        v2.13.1 # Python 3.10 이상을 완벽 지원하는 안정화 버전
 )
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+FetchContent_MakeAvailable(pybind11)
 
-target_link_libraries(test_matrix_core gtest_main)
-target_link_libraries(test_dynamics gtest_main)
-target_link_libraries(test_solver gtest_main)
-target_link_libraries(test_NMPC gtest_main)
-target_link_libraries(test_estimator gtest_main)
+# ==============================================================================
+# [Include Directory Setup]
+# ==============================================================================
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# ==============================================================================
+# [Target Definition]
+# ==============================================================================
+# 래퍼 소스 코드가 src 디렉토리 하위에 위치해야 함을 잊지 마십시오.
+pybind11_add_module(nmpc_core src/nmpc_wrapper.cpp)
+
+# ==============================================================================
+# [Compiler Flags Tuning] 하드 리얼타임을 위한 극한의 최적화
+# ==============================================================================
+target_compile_options(nmpc_core PRIVATE 
+    -O3 
+    -march=native 
+    -ffast-math 
+    -funroll-loops
+    -fomit-frame-pointer
+    -Wno-psabi        # 64-byte alignment 관련 경고 무시
+    -Wno-sign-compare # FastMath의 index 비교 경고 무시
+)
+
+# Interprocedural Optimization (LTO)
+# 링크 단계에서 함수 호출 오버헤드를 완전히 박살내기 위한 인라인화
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_supported OUTPUT error)
+if(ipo_supported)
+    set_target_properties(nmpc_core PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
+
+target_include_directories(nmpc_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
