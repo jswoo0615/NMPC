@@ -46,28 +46,33 @@ class SparseNMPCWrapper {
             wp_y_ptr = static_cast<double*>(wp_y_buf.ptr);
             obstacle_ptr = static_cast<double*>(obs_buf.ptr);
 
-            config.target_vx = 10.0; // 90km/h에 맞춰 타겟을 상향 조정합니다.
+            // [아키텍트의 수술: 90km/h 주행을 위한 예측/물리 밸런스 완벽 동기화]
+            config.target_vx = 25.0;  // 모델 내부의 마찰원 계산 기준을 현실 속도(90km/h)와 일치시킴
             
-            // [아키텍트의 수술: 2. 비용 함수 밸런스 재조정]
-            config.Q_D = 200.0;       // 궤적을 좀 더 타이트하게 추종하되
-            config.Q_mu = 50.0;       // 헤딩 안정성 유지
-            config.Q_Vx = 5.0;        // 속도 오차에 대한 강박을 줄임 (속도는 물리 엔진에 맡김)
-            config.Q_Vy = 5.0;        
-            config.Q_r = 5.0;         
+            config.Q_D = 100.0;       
+            config.Q_mu = 50.0;       
+            config.Q_Vx = 5.0;        
+            config.Q_Vy = 20.0;       
+            config.Q_r = 20.0;        
 
-            // [아키텍트의 수술: 3. 슬립각 페널티 하향]
-            // 2000.0은 너무 가혹합니다. 200.0으로 낮추어 타이어의 자연스러운 슬립을 허용하십시오.
-            config.Q_alpha_f = 2000.0;
-            config.Q_alpha_r = 2000.0;
+            // 슬립각에 대한 페널티를 자연스러운 물리 현상 수준으로 하향
+            config.Q_alpha_f = 200.0;
+            config.Q_alpha_r = 200.0;
 
-            config.R_Steer = 150.0;    // 조향을 좀 더 부드럽게 가져갑니다.
-            config.R_Accel = 1.0;     // 가속 명령을 해방합니다.
-            
+            config.R_Steer = 50.0;    
+            config.R_Accel = 1.0;     
+
+            // [Phase 2] 조향 발작 원천 차단: Steer Rate Penalty 강력 주입
+            // 10ms 단위로 핸들을 급격히 꺾는 것에 엄청난 벌금을 매겨, 조향의 기계적 관성을 수학적으로 강제함
+            config.R_SteerRate = 5000.0; 
+
             config.Obstacle_Margin = 0.0;
-            
-            // 조향/가속 제한은 물리적 한계로 넉넉하게 풉니다.
-            config.u_min[0] = -0.6; config.u_max[0] = 0.6;
-            config.u_min[1] = -10.0; config.u_max[1] = 10.0;
+
+            // 기계적 한계는 완전히 열어둠. 제약(Constraint)이 아니라 비용(Cost)으로 제어하는 것이 진짜 NMPC.
+            config.u_min[0] = -0.6; 
+            config.u_max[0] = 0.6;
+            config.u_min[1] = -3.0; 
+            config.u_max[1] = 3.0;
         }
 
         void set_target_speed(double speed) {
@@ -75,24 +80,13 @@ class SparseNMPCWrapper {
         }
 
         void update_config(py::dict opt_dict) {
-            if (opt_dict.contains("Q_D")) {
-                config.Q_D = opt_dict["Q_D"].cast<double>();
-            }
-            if (opt_dict.contains("Q_mu")) {
-                config.Q_mu = opt_dict["Q_mu"].cast<double>();
-            }
-            if (opt_dict.contains("Q_Vx")) {
-                config.Q_Vx = opt_dict["Q_Vx"].cast<double>();
-            }
-            if (opt_dict.contains("Q_Vy")) {
-                config.Q_Vy = opt_dict["Q_Vy"].cast<double>();
-            }
-            if (opt_dict.contains("R_Steer")) {
-                config.R_Steer = opt_dict["R_Steer"].cast<double>();
-            }
-            if (opt_dict.contains("R_Accel")) {
-                config.R_Accel = opt_dict["R_Accel"].cast<double>();
-            }
+            if (opt_dict.contains("Q_D")) config.Q_D = opt_dict["Q_D"].cast<double>();
+            if (opt_dict.contains("Q_mu")) config.Q_mu = opt_dict["Q_mu"].cast<double>();
+            if (opt_dict.contains("Q_Vx")) config.Q_Vx = opt_dict["Q_Vx"].cast<double>();
+            if (opt_dict.contains("Q_Vy")) config.Q_Vy = opt_dict["Q_Vy"].cast<double>();
+            if (opt_dict.contains("R_Steer")) config.R_Steer = opt_dict["R_Steer"].cast<double>();
+            if (opt_dict.contains("R_Accel")) config.R_Accel = opt_dict["R_Accel"].cast<double>();
+            if (opt_dict.contains("R_SteerRate")) config.R_SteerRate = opt_dict["R_SteerRate"].cast<double>();
         }
 
         struct FrenetState {
@@ -100,9 +94,7 @@ class SparseNMPCWrapper {
         };
 
         FrenetState project_vehicle_state(double x, double y, double yaw) {
-            if (!spline_valid) {
-                return {0.0, 0.0, 0.0};
-            }
+            if (!spline_valid) return {0.0, 0.0, 0.0};
 
             double s_center = last_s_projection;
             double best_s = s_center;
@@ -111,14 +103,10 @@ class SparseNMPCWrapper {
             const double search_window = 15.0;
             const double coarse_step = 0.5;
 
-            // 1. Coarse Search
             for (double ds = -search_window; ds <= search_window; ds += coarse_step) {
                 double s = std::clamp(s_center + ds, 0.0, spline.get_max_s());
-                double px = spline.calc_x(s);
-                double py = spline.calc_y(s);
-
-                double dx = px - x;
-                double dy = py - y;
+                double dx = spline.calc_x(s) - x;
+                double dy = spline.calc_y(s) - y;
                 double dist2 = dx * dx + dy * dy;
 
                 if (dist2 < best_dist2) {
@@ -127,52 +115,34 @@ class SparseNMPCWrapper {
                 }
             }
 
-            // 2. Newton Refinement
             double s_opt = best_s;
             for (int iter = 0; iter < 5; ++iter) {
                 double px = spline.calc_x(s_opt);
                 double py = spline.calc_y(s_opt);
-
                 double dx_ds = spline.sx.calc_d1(s_opt);
                 double dy_ds = spline.sy.calc_d1(s_opt);
-
                 double ddx_ds = spline.sx.calc_d2(s_opt);
                 double ddy_ds = spline.sy.calc_d2(s_opt);
-
                 double ex = px - x;
                 double ey = py - y;
 
-                double f = ex * dx_ds + ey * dy_ds; // 수정됨 (dy_Ds -> dy_ds)
-                double df = dx_ds * dx_ds + dy_ds * dy_ds + ex * ddx_ds + ey * ddy_ds; // 수정됨 (ddy_df -> ddy_ds)
+                double f = ex * dx_ds + ey * dy_ds; 
+                double df = dx_ds * dx_ds + dy_ds * dy_ds + ex * ddx_ds + ey * ddy_ds; 
 
-                if (std::abs(df) < 1e-8) {
-                    break;
-                }
+                if (std::abs(df) < 1e-8) break;
 
                 s_opt -= f / df;
                 s_opt = std::clamp(s_opt, 0.0, spline.get_max_s());
             }
 
-            // 3. Frenet State
-            double ref_x = spline.calc_x(s_opt);
-            double ref_y = spline.calc_y(s_opt);
             double ref_yaw = spline.calc_yaw(s_opt);
-
-            double dx = x - ref_x;
-            double dy = y - ref_y;
-
-            double d = -dx * std::sin(ref_yaw) + dy * std::cos(ref_yaw);
+            double d = -(x - spline.calc_x(s_opt)) * std::sin(ref_yaw) + (y - spline.calc_y(s_opt)) * std::cos(ref_yaw);
             double mu = yaw - ref_yaw;
 
-            while (mu > M_PI) {
-                mu -= 2.0 * M_PI;
-            }
-            while (mu < -M_PI) {
-                mu += 2.0 * M_PI;
-            }
+            while (mu > M_PI) mu -= 2.0 * M_PI;
+            while (mu < -M_PI) mu += 2.0 * M_PI;
 
             last_s_projection = s_opt;
-
             return {s_opt, d, mu};
         }
 
@@ -182,11 +152,7 @@ class SparseNMPCWrapper {
 
             for (int i = 0; i < num_wp && n < MaxWp; ++i) {
                 if (n > 0) {
-                    double dx = wp_x_ptr[i] - wp_x_arr[n - 1];
-                    double dy = wp_y_ptr[i] - wp_y_arr[n - 1];
-                    if (std::hypot(dx, dy) < 1e-3) {
-                        continue;
-                    }
+                    if (std::hypot(wp_x_ptr[i] - wp_x_arr[n - 1], wp_y_ptr[i] - wp_y_arr[n - 1]) < 1e-3) continue;
                 }
                 wp_x_arr[n] = wp_x_ptr[i];
                 wp_y_arr[n] = wp_y_ptr[i];
@@ -201,14 +167,11 @@ class SparseNMPCWrapper {
             spline.build(wp_x_arr, wp_y_arr, n);
             spline_valid = true;
 
-            double x_veh = ego_state_ptr[0];
-            double y_veh = ego_state_ptr[1];
-            double yaw_veh = ego_state_ptr[2];
             double vx = ego_state_ptr[3];
             double vy = ego_state_ptr[4];
             double r_rate = ego_state_ptr[5];
 
-            auto frenet = project_vehicle_state(x_veh, y_veh, yaw_veh);
+            auto frenet = project_vehicle_state(ego_state_ptr[0], ego_state_ptr[1], ego_state_ptr[2]);
 
             matrix::StaticVector<double, Nx_mem> x_curr;
             x_curr.set_zero();
@@ -219,34 +182,27 @@ class SparseNMPCWrapper {
             x_curr(4) = vy;
             x_curr(5) = r_rate;
 
-            // 조향 입력 지연 보상 및 타이어 동역학 반영
             double delta = nmpc.u_last(0);
-            double alpha_f = std::atan2(vy + lf * r_rate, std::max(0.5, vx)) - delta;
-            double alpha_r = std::atan2(vy - lr * r_rate, std::max(0.5, vx));
-
-            x_curr(6) = alpha_f;
-            x_curr(7) = alpha_r;
+            x_curr(6) = std::atan2(vy + lf * r_rate, std::max(0.5, vx)) - delta;
+            x_curr(7) = std::atan2(vy - lr * r_rate, std::max(0.5, vx));
 
             double dt = nmpc.dt;
 
+            // [Phase 1 아키텍트의 수술: 맹인의 시력 회복 (Predictive Curvature Horizon)]
+            // 100 스텝 앞까지의 모든 곡률을 배열에 저장하여 NMPC에 미래 시야를 제공합니다.
+            // [Phase 1 아키텍트의 수술: 맹인의 시력 회복 (Predictive Curvature Horizon)]
             for (std::size_t k = 0; k < H; ++k) {
-                double s_pred = frenet.s + config.target_vx * k * dt;
+                // [수술 부위: 시야 붕괴 방지]
+                // 차량이 정지해 있더라도, 최소 5.0m/s(약 18km/h)로 달릴 때의 거리를 내다보도록 강제합니다.
+                // 제자리에서 핸들을 비비는 환각을 원천 차단합니다.
+                double v_horizon = std::max(5.0, config.target_vx);
+                double s_pred = frenet.s + v_horizon * k * dt;
                 
-                if (s_pred > spline.get_max_s()) {
-                    s_pred = spline.get_max_s();
-                }
+                s_pred = std::clamp(s_pred, 0.0, spline.get_max_s());
 
-                if (k == 0) {
-                    double raw_kappa = spline.calc_curvature(s_pred);
-                    if (raw_kappa > 0.2) {
-                        raw_kappa = 0.2;
-                    }
-                    if (raw_kappa < -0.2) {
-                        raw_kappa = -0.2;
-                    }
-                    config.kappa = raw_kappa;
-                }
-                config.target_d[k] = 0.0; // 오타 수정됨 (config.target_d[k] - 0.0; -> = 0.0;)
+                double raw_kappa = spline.calc_curvature(s_pred);
+                config.kappa_ref[k] = std::clamp(raw_kappa, -0.2, 0.2); 
+                config.target_d[k] = 0.0; 
             }
 
             for (std::size_t i = 0; i < 10; ++i) {
@@ -267,13 +223,12 @@ class SparseNMPCWrapper {
             }
 
             nmpc.shift_sequence();
-
             return py::make_tuple(res.status_msg, py::make_tuple(u_opt(0), u_opt(1)));
         }
 };
 
 PYBIND11_MODULE(nmpc_core, m) {
-    py::class_<SparseNMPCWrapper>(m, "SparseNMPCWrapper") // 오타 수정됨 (SparseNMPCWrappter)
+    py::class_<SparseNMPCWrapper>(m, "SparseNMPCWrapper")
         .def(py::init<py::array_t<double>, py::array_t<double>, py::array_t<double>, py::array_t<double>>())
         .def("set_target_speed", &SparseNMPCWrapper::set_target_speed)
         .def("update_config", &SparseNMPCWrapper::update_config)
