@@ -46,20 +46,28 @@ class SparseNMPCWrapper {
             wp_y_ptr = static_cast<double*>(wp_y_buf.ptr);
             obstacle_ptr = static_cast<double*>(obs_buf.ptr);
 
-            config.target_vx = 5.0;
-            config.Q_D = 100.0;
-            config.Q_mu = 10.0;
-            config.Q_Vx = 10.0;
-            config.Q_Vy = 1.0;
-            config.Q_r = 1.0;
+            config.target_vx = 10.0; // 90km/h에 맞춰 타겟을 상향 조정합니다.
+            
+            // [아키텍트의 수술: 2. 비용 함수 밸런스 재조정]
+            config.Q_D = 200.0;       // 궤적을 좀 더 타이트하게 추종하되
+            config.Q_mu = 50.0;       // 헤딩 안정성 유지
+            config.Q_Vx = 5.0;        // 속도 오차에 대한 강박을 줄임 (속도는 물리 엔진에 맡김)
+            config.Q_Vy = 5.0;        
+            config.Q_r = 5.0;         
 
-            config.Q_alpha_f = 1000.0;
-            config.Q_alpha_r = 1000.0;
+            // [아키텍트의 수술: 3. 슬립각 페널티 하향]
+            // 2000.0은 너무 가혹합니다. 200.0으로 낮추어 타이어의 자연스러운 슬립을 허용하십시오.
+            config.Q_alpha_f = 2000.0;
+            config.Q_alpha_r = 2000.0;
 
-            config.R_Steer = 2000.0;
-            config.R_Accel = 200.0;
-
+            config.R_Steer = 150.0;    // 조향을 좀 더 부드럽게 가져갑니다.
+            config.R_Accel = 1.0;     // 가속 명령을 해방합니다.
+            
             config.Obstacle_Margin = 0.0;
+            
+            // 조향/가속 제한은 물리적 한계로 넉넉하게 풉니다.
+            config.u_min[0] = -0.6; config.u_max[0] = 0.6;
+            config.u_min[1] = -10.0; config.u_max[1] = 10.0;
         }
 
         void set_target_speed(double speed) {

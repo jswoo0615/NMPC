@@ -118,6 +118,19 @@ class LocalPlanner(object):
         self._ego_state[4] = vy
         self._ego_state[5] = r_rad
 
+        current_vx_kph = vx * 3.6
+        
+        dynamic_R_Steer = 50.0 + (current_vx_kph * 2.0)  # 예: 50km/h일 때 R_Steer = 150
+        dynamic_Q_D = max(50.0, 300.0 - (current_vx_kph * 3.0)) # 고속일수록 Q_D를 낮춰 유연성 확보
+        dynamic_Q_Vy = 100.0 + (current_vx_kph * 5.0) # 고속일수록 측면 미끄러짐에 대한 징벌 강화
+
+        adaptive_opt_dict = {
+            'R_Steer': float(dynamic_R_Steer),
+            'Q_D': float(dynamic_Q_D),
+            'Q_Vy': float(dynamic_Q_Vy)
+        }
+        self._nmpc_solver.update_config(adaptive_opt_dict)
+
         num_wp = len(self._waypoint_buffer)
         for i in range(num_wp):
             wp = self._waypoint_buffer[i][0]
