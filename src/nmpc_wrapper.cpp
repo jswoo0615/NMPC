@@ -27,6 +27,7 @@ class SparseNMPCWrapper {
 
         double last_s_projection = 0.0;
         bool spline_valid = false;
+        bool initialized_projection = false;
 
         constexpr static double lf = 1.4;
         constexpr static double lr = 1.6;
@@ -85,6 +86,7 @@ class SparseNMPCWrapper {
             if (opt_dict.contains("R_Accel")) config.R_Accel = opt_dict["R_Accel"].cast<double>();
             if (opt_dict.contains("R_SteerRate")) config.R_SteerRate = opt_dict["R_SteerRate"].cast<double>();
             if (opt_dict.contains("R_AccelRate")) config.R_AccelRate = opt_dict["R_AccelRate"].cast<double>();
+            if (opt_dict.contains("Q_kappa_track")) config.Q_kappa_track = opt_dict["Q_kappa_track"].cast<double>();
         }
 
         struct FrenetState {
@@ -95,11 +97,23 @@ class SparseNMPCWrapper {
             if (!spline_valid) return {0.0, 0.0, 0.0};
 
             double s_center = last_s_projection;
+
+            // Cold start 감지: 초기화 전이거나, 이전 프로젝션 위치와 현재 위치 괴리가 클 때
+            bool needs_global_search = !initialized_projection;
+            if (!needs_global_search) {
+                double dx_check = spline.calc_x(s_center) - x;
+                double dy_check = spline.calc_y(s_center) - y;
+                if (dx_check * dx_check + dy_check * dy_check > 25.0) { // 5m 이상 괴리
+                    needs_global_search = true;
+                }
+            }
+
+            double search_window = needs_global_search ? spline.get_max_s() : 15.0;
+            double coarse_step = needs_global_search ? 2.0 : 0.5;
+            if (needs_global_search) s_center = spline.get_max_s() / 2.0;
+
             double best_s = s_center;
             double best_dist2 = std::numeric_limits<double>::max();
-
-            const double search_window = 15.0;
-            const double coarse_step = 0.5;
 
             for (double ds = -search_window; ds <= search_window; ds += coarse_step) {
                 double s = std::clamp(s_center + ds, 0.0, spline.get_max_s());
@@ -141,6 +155,7 @@ class SparseNMPCWrapper {
             while (mu < -M_PI) mu += 2.0 * M_PI;
 
             last_s_projection = s_opt;
+            initialized_projection = true;
             return {s_opt, d, mu};
         }
 

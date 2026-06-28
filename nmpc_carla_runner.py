@@ -51,7 +51,7 @@ def main():
             world.tick()
 
         # 초기 변속기 강제 체결 및 주차 브레이크 해제
-        wake_up_control = carla.VehicleControl(throttle=0.0, brake=1.0, steer=0.0, hand_brake=False, manula_gear_shift=False)
+        wake_up_control = carla.VehicleControl(throttle=0.0, brake=1.0, steer=0.0, hand_brake=False, manual_gear_shift=False)
         ego_vehicle.apply_control(wake_up_control)
         world.tick()
 
