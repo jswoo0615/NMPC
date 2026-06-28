@@ -47,8 +47,9 @@ namespace Optimization {
             double R_Steer = 5000.0;
             double R_Accel = 10.0;
 
-            double R_Steer_Rate = 50000.0;
-            double R_Accel_Rate = 100.0;
+            // [Phase 2] 조향 및 가속 변화율 페널티
+            double R_SteerRate = 1500.0; 
+            double R_AccelRate = 100.0;
 
             double Obstacle_Penalty = 20000.0;  
             double Obstacle_Margin = 1.5;
@@ -63,9 +64,10 @@ namespace Optimization {
             double u_min[2] = {-0.6, -10.0};
             double u_max[2] = {0.6, 10.0};
 
-            double kappa = 0.0;
+            // [Phase 1] 단일 곡률을 예측 곡률 배열로 승격 (최대 예측 거리 H=200까지 넉넉하게 대응)
+            double kappa_ref[200] = {0.0};
+            
             double target_vx = 10.0;
-            // [Architect Correction] H=100일 때의 Out of Bounds 에러 방지를 위해 넉넉한 버퍼 확보
             double target_d[200] = {0.0};
 
             int ipm_max_iter = 8;
@@ -123,6 +125,8 @@ namespace Optimization {
                     U_guess[H - 1](1) *= 0.5;
 
                     PlantModel model;
+                    // 마지막 스텝의 동역학 평가 시 곡률 주입
+                    model.kappa = 0.0; // 시퀀스 시프트 후 H 위치의 곡률은 외부에서 다시 평가해야 함. 일단 0으로 둠.
                     X_pred[H] = integrator::step_rk4<Nx_mem, Nu, PlantModel, double>(model, X_pred[H - 1], U_guess[H - 1], dt);
                 }
 
@@ -153,7 +157,7 @@ namespace Optimization {
                     
                     const double max_stage_weight = std::max({
                         config.Q_D, config.Q_mu, config.Q_Vx, config.Q_Vy, config.Q_r,
-                        config.Q_alpha_f, config.Q_alpha_r, config.R_Steer, config.R_Accel
+                        config.Q_alpha_f, config.Q_alpha_r, config.R_Steer, config.R_Accel, config.R_SteerRate
                     });
                     const double L1_WEIGHT = std::max(1000.0, 10.0 * max_stage_weight);
 
@@ -187,6 +191,19 @@ namespace Optimization {
 
                         merit += 0.5 * (config.R_Steer * u_cand(0) * u_cand(0) + config.R_Accel * u_cand(1) * u_cand(1));
                         
+                        // [Phase 2] Steer Rate / Accel Rate Cost 평가
+                        matrix::StaticVector<double, Nu> u_prev_cand;
+                        if (k == 0) {
+                            u_prev_cand = u_last;
+                        } else {
+                            u_prev_cand = U_guess[k-1];
+                            u_prev_cand.saxpy(alpha, riccati.du[k-1]);
+                        }
+                        
+                        double delta_steer = u_cand(0) - u_prev_cand(0);
+                        double delta_accel = u_cand(1) - u_prev_cand(1);
+                        merit += 0.5 * (config.R_SteerRate * delta_steer * delta_steer + config.R_AccelRate * delta_accel * delta_accel);
+
                         auto eval_barrier = [&](double c, double s, double ds) {
                             double s_cand = s + alpha * ds;
                             if (s_cand <= 1e-8) {
@@ -231,8 +248,6 @@ namespace Optimization {
                     if (std::isnan(x_curr(1)) || std::isnan(x_curr(3))) {
                         return execute_fallback(result, "Primal State NaN Detected", config);
                     }
-                    PlantModel model;
-                    model.kappa = config.kappa;
                     
                     env_evaluator.obstacle_margin = config.Obstacle_Margin;
 
@@ -241,8 +256,12 @@ namespace Optimization {
 
                     mu = 1.0;
 
+                    PlantModel model_forward;
                     for (std::size_t k = 0; k < H; ++k) {
-                        X_pred[k + 1] = integrator::step_rk4<Nx_mem, Nu, PlantModel, double>(model, X_pred[k], U_guess[k], dt);
+                        // [Phase 1] 매 스텝마다 예측 곡률 주입
+                        model_forward.kappa = config.kappa_ref[k]; 
+                        
+                        X_pred[k + 1] = integrator::step_rk4<Nx_mem, Nu, PlantModel, double>(model_forward, X_pred[k], U_guess[k], dt);
                         double d_val = X_pred[k](1);
                         auto init_dual = [&](double c, ConstraintState& cs) {
                             cs.s = MathTraits<double>::max(cs.s, MathTraits<double>::max(0.1, -c));
@@ -272,32 +291,29 @@ namespace Optimization {
                         bool update_jacobian = (ipm_step % 2 == 0);
 
                         if (update_jacobian) {
-                            // Dual 변수의 미분 추적 개수는 활성 상태(6) + 제어 입력(2) = 총 8개
                             using ADVar = matrix::DualVec<double, Nx_active + Nu>;
+                            PlantModel model_ad;
                             for (std::size_t k = 0; k < H; ++k) {
-                                // [Architect Correction] 적분기와 동역학 모델 템플릿 매칭을 위해 크기를 Nx_mem(8)으로 일치시킴
+                                // [Phase 1] Jacobian 평가 시에도 정확한 곡률 주입
+                                model_ad.kappa = config.kappa_ref[k];
+
                                 matrix::StaticVector<ADVar, Nx_mem> x_dual;
                                 matrix::StaticVector<ADVar, Nu> u_dual;
 
-                                // 1. 앞의 6개 변수는 미분 그래디언트를 추적함
                                 for (std::size_t i = 0; i < Nx_active; ++i) {
                                     x_dual(i) = ADVar::make_variable(X_pred[k](i), i);
                                 }
-                                // 2. 뒤의 2개 예약 변수는 단순 값(v)만 복사하고 미분값은 상수(0.0) 취급
                                 for (std::size_t i = Nx_active; i < Nx_mem; ++i) {
                                     x_dual(i) = ADVar();
                                     x_dual(i).v = X_pred[k](i);
                                 }
-                                // 3. 제어 입력 2개는 인덱스 추적을 이어서(Nx_active ~) 부여함
                                 for (std::size_t i = 0; i < Nu; ++i) {
                                     u_dual(i) = ADVar::make_variable(U_guess[k](i), Nx_active + i);    
                                 }
 
-                                // теперь 8칸 메모리 배열이 들어오므로 PlantModel(8칸) 컴파일러 에러가 사라집니다.
                                 matrix::StaticVector<ADVar, Nx_mem> x_next_dual = 
-                                    integrator::step_rk4<Nx_mem, Nu, PlantModel, ADVar>(model, x_dual, u_dual, dt);
+                                    integrator::step_rk4<Nx_mem, Nu, PlantModel, ADVar>(model_ad, x_dual, u_dual, dt);
 
-                                // KKT 행렬 추출은 철저하게 앞의 Nx_active(6) 개수만 뽑아냅니다.
                                 for (std::size_t j = 0; j < Nx_active; ++j) {
                                     for (std::size_t i = 0; i < Nx_active; ++i) {
                                         riccati.A[k](i, j) = x_next_dual(i).g[j];
@@ -341,10 +357,21 @@ namespace Optimization {
                             riccati.Q[k](5, 5) = config.Q_r;
                             riccati.q[k](5) = config.Q_r * X_pred[k](5);
                             
-                            riccati.R[k](0, 0) = config.R_Steer;
+                            // [Phase 2] Riccati R 행렬과 r 벡터에 Slew Rate 페널티 편입
+                            // u_k에 대한 자체 페널티
+                            riccati.R[k](0, 0) = config.R_Steer + config.R_SteerRate;
                             riccati.r[k](0) = config.R_Steer * U_guess[k](0);
-                            riccati.R[k](1, 1) = config.R_Accel;
+                            riccati.R[k](1, 1) = config.R_Accel + config.R_AccelRate;
                             riccati.r[k](1) = config.R_Accel * U_guess[k](1);
+
+                            // u_{k-1} 과의 상호작용 (간이 처리)
+                            if (k == 0) {
+                                riccati.r[k](0) += config.R_SteerRate * (U_guess[0](0) - u_last(0));
+                                riccati.r[k](1) += config.R_AccelRate * (U_guess[0](1) - u_last(1));
+                            } else {
+                                riccati.r[k](0) += config.R_SteerRate * (U_guess[k](0) - U_guess[k-1](0));
+                                riccati.r[k](1) += config.R_AccelRate * (U_guess[k](1) - U_guess[k-1](1));
+                            }
 
                             auto apply_condensed = [&](double c, double J_x0, double J_x1, double J_u0, double J_u1, ConstraintState& cs) {
                                 double J_term = (mu + cs.lam * c) / cs.s;

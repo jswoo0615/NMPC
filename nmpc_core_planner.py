@@ -117,14 +117,75 @@ class LocalPlanner(object):
         self._ego_state[3] = vx
         self._ego_state[4] = vy
         self._ego_state[5] = r_rad
+        
+        # [아키텍트의 수술: Speed & Steering Profiling 및 스무딩 통합본]
+        # 변수 초기화: 웨이포인트 버퍼가 고갈되어도 로직이 붕괴하지 않도록 기본값 할당
+        angle_diff = 0.0 
+        
+        lookahead_idx = min(15, len(self._waypoint_buffer) - 1)
+        if lookahead_idx > 5:
+            wp_now = self._waypoint_buffer[0][0].transform.get_forward_vector()
+            wp_future = self._waypoint_buffer[lookahead_idx][0].transform.get_forward_vector()
+            
+            dot_prod = np.clip(wp_now.x * wp_future.x + wp_now.y * wp_future.y, -1.0, 1.0)
+            angle_diff = math.degrees(math.acos(dot_prod))
+            
+        # 곡률에 따른 타겟 속도 및 조향 관성 계산
+        if angle_diff > 10.0:
+            raw_target_v = max(4.0, 25.0 - (angle_diff * 0.5))
+            dynamic_R_SteerRate = max(100.0, 1500.0 - (angle_diff * 50.0))
+        else:
+            raw_target_v = 25.0
+            dynamic_R_SteerRate = 1500.0
+            
+        # 초기화가 안 되어 있다면 현재 속도로 초기화 하되, 
+        # 정지 상태 출발 시 최소한의 초기 타겟 속도(5.0m/s)를 보장하여 솔버가 가속 의지를 갖게 함
+        if not hasattr(self, '_smoothed_target_v'):
+            self._smoothed_target_v = max(5.0, vx) 
+            
+        # EMA 필터
+        alpha_v = 0.02 
+        self._smoothed_target_v = (alpha_v * raw_target_v) + ((1.0 - alpha_v) * self._smoothed_target_v)
+            
+        self._nmpc_solver.set_target_speed(self._smoothed_target_v)
+        
+        adaptive_opt = {
+            'R_SteerRate': float(dynamic_R_SteerRate)
+        }
+        self._nmpc_solver.update_config(adaptive_opt)
 
+        # (NMPC Solve 호출 직전의 Waypoint 좌표 할당 부분)
         num_wp = len(self._waypoint_buffer)
-        for i in range(num_wp):
-            wp = self._waypoint_buffer[i][0]
-            self._wp_x[i] = wp.transform.location.x
-            self._wp_y[i] = wp.transform.location.y
+        
+        # 1. CARLA의 날것(Raw) 좌표를 임시 리스트에 추출
+        raw_x = [self._waypoint_buffer[i][0].transform.location.x for i in range(num_wp)]
+        raw_y = [self._waypoint_buffer[i][0].transform.location.y for i in range(num_wp)]
 
-        # NMPC Solve
+        # [아키텍트의 수술: Reference Generator - 공간 로우패스 필터]
+        # 교차로의 90도 꺾임(Kink) 현상을 방지하기 위해 윈도우 사이즈 5의 이동 평균 필터를 통과시킵니다.
+        # 직각 모서리가 자동차가 실제로 돌 수 있는 부드러운 곡선(Curve)으로 물리적으로 다듬어집니다.
+        # [아키텍트의 수술: 적응형 공간 필터]
+        # 저속(출발/정차)에서는 필터를 끄고 원본 웨이포인트를 사용하여 응답성을 살립니다.
+        # 고속(곡률 변화가 크고 반응이 늦은 구간)에서만 필터를 작동시킵니다.
+        
+        window = 5
+        half_w = window // 2
+        
+        # 필터링 여부 결정: 속도가 2m/s(7.2km/h) 미만이면 필터링 없이 원본 사용
+        if vx < 2.0:
+            for i in range(num_wp):
+                self._wp_x[i] = raw_x[i]
+                self._wp_y[i] = raw_y[i]
+        else:
+            for i in range(num_wp):
+                if i < half_w or i >= num_wp - half_w:
+                    self._wp_x[i] = raw_x[i]
+                    self._wp_y[i] = raw_y[i]
+                else:
+                    self._wp_x[i] = sum(raw_x[i-half_w : i+half_w+1]) / float(window)
+                    self._wp_y[i] = sum(raw_y[i-half_w : i+half_w+1]) / float(window)
+
+        # NMPC Solve 
         status, (steer_rad, accel) = self._nmpc_solver.solve(num_wp)
 
         # C++ 엔진의 판단을 100% 신뢰하되, 특이점 방지용 절대 한계선만 유지
@@ -137,7 +198,6 @@ class LocalPlanner(object):
 
         control = carla.VehicleControl()
         control.steer = float(np.clip(steer_norm, -1.0, 1.0))
-        control.gear = 1
         control.manual_gear_shift = False
         control.hand_brake = False
 
