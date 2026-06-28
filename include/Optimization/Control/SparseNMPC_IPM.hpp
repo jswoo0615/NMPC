@@ -47,9 +47,12 @@ namespace Optimization {
             double R_Steer = 5000.0;
             double R_Accel = 10.0;
 
-            // [Phase 2] 조향 및 가속 변화율 페널티
             double R_SteerRate = 1500.0; 
             double R_AccelRate = 100.0;
+
+            double Q_kappa_track = 1500.0; 
+            double Q_ay = 10.0;            
+            double L_wb = 3.0;             
 
             double Obstacle_Penalty = 20000.0;  
             double Obstacle_Margin = 1.5;
@@ -64,7 +67,6 @@ namespace Optimization {
             double u_min[2] = {-0.6, -10.0};
             double u_max[2] = {0.6, 10.0};
 
-            // [Phase 1] 단일 곡률을 예측 곡률 배열로 승격 (최대 예측 거리 H=200까지 넉넉하게 대응)
             double kappa_ref[200] = {0.0};
             
             double target_vx = 10.0;
@@ -125,8 +127,7 @@ namespace Optimization {
                     U_guess[H - 1](1) *= 0.5;
 
                     PlantModel model;
-                    // 마지막 스텝의 동역학 평가 시 곡률 주입
-                    model.kappa = 0.0; // 시퀀스 시프트 후 H 위치의 곡률은 외부에서 다시 평가해야 함. 일단 0으로 둠.
+                    model.kappa = 0.0; 
                     X_pred[H] = integrator::step_rk4<Nx_mem, Nu, PlantModel, double>(model, X_pred[H - 1], U_guess[H - 1], dt);
                 }
 
@@ -191,7 +192,7 @@ namespace Optimization {
 
                         merit += 0.5 * (config.R_Steer * u_cand(0) * u_cand(0) + config.R_Accel * u_cand(1) * u_cand(1));
                         
-                        // [Phase 2] Steer Rate / Accel Rate Cost 평가
+                        // [아키텍트의 수술: 전체 지평에 대한 Jerk 및 Steer Rate Merit 평가 복원]
                         matrix::StaticVector<double, Nu> u_prev_cand;
                         if (k == 0) {
                             u_prev_cand = u_last;
@@ -199,10 +200,16 @@ namespace Optimization {
                             u_prev_cand = U_guess[k-1];
                             u_prev_cand.saxpy(alpha, riccati.du[k-1]);
                         }
-                        
                         double delta_steer = u_cand(0) - u_prev_cand(0);
                         double delta_accel = u_cand(1) - u_prev_cand(1);
                         merit += 0.5 * (config.R_SteerRate * delta_steer * delta_steer + config.R_AccelRate * delta_accel * delta_accel);
+
+                        double delta_ff = config.L_wb * config.kappa_ref[k];
+                        double err_steer_track = u_cand(0) - delta_ff;
+                        merit += 0.5 * (config.Q_kappa_track * err_steer_track * err_steer_track);
+
+                        double a_y = x_curr(3) * x_curr(5);
+                        merit += 0.5 * (config.Q_ay * a_y * a_y);
 
                         auto eval_barrier = [&](double c, double s, double ds) {
                             double s_cand = s + alpha * ds;
@@ -258,7 +265,6 @@ namespace Optimization {
 
                     PlantModel model_forward;
                     for (std::size_t k = 0; k < H; ++k) {
-                        // [Phase 1] 매 스텝마다 예측 곡률 주입
                         model_forward.kappa = config.kappa_ref[k]; 
                         
                         X_pred[k + 1] = integrator::step_rk4<Nx_mem, Nu, PlantModel, double>(model_forward, X_pred[k], U_guess[k], dt);
@@ -294,7 +300,6 @@ namespace Optimization {
                             using ADVar = matrix::DualVec<double, Nx_active + Nu>;
                             PlantModel model_ad;
                             for (std::size_t k = 0; k < H; ++k) {
-                                // [Phase 1] Jacobian 평가 시에도 정확한 곡률 주입
                                 model_ad.kappa = config.kappa_ref[k];
 
                                 matrix::StaticVector<ADVar, Nx_mem> x_dual;
@@ -357,21 +362,48 @@ namespace Optimization {
                             riccati.Q[k](5, 5) = config.Q_r;
                             riccati.q[k](5) = config.Q_r * X_pred[k](5);
                             
-                            // [Phase 2] Riccati R 행렬과 r 벡터에 Slew Rate 페널티 편입
-                            // u_k에 대한 자체 페널티
-                            riccati.R[k](0, 0) = config.R_Steer + config.R_SteerRate;
+                            riccati.R[k](0, 0) = config.R_Steer;
                             riccati.r[k](0) = config.R_Steer * U_guess[k](0);
-                            riccati.R[k](1, 1) = config.R_Accel + config.R_AccelRate;
+                            riccati.R[k](1, 1) = config.R_Accel;
                             riccati.r[k](1) = config.R_Accel * U_guess[k](1);
 
-                            // u_{k-1} 과의 상호작용 (간이 처리)
-                            if (k == 0) {
-                                riccati.r[k](0) += config.R_SteerRate * (U_guess[0](0) - u_last(0));
-                                riccati.r[k](1) += config.R_AccelRate * (U_guess[0](1) - u_last(1));
-                            } else {
-                                riccati.r[k](0) += config.R_SteerRate * (U_guess[k](0) - U_guess[k-1](0));
-                                riccati.r[k](1) += config.R_AccelRate * (U_guess[k](1) - U_guess[k-1](1));
+                            // [아키텍트의 수술: SQP Gradient Injection을 통한 전체 지평 Jerk 제어]
+                            // 오프 대각선(Off-diagonal) 결합을 피하면서, SQP의 1차 미분(Gradient)을 통해 
+                            // 100스텝 전체의 변화율(Slew Rate/Jerk) 비용을 완벽하게 소급시킵니다.
+                            matrix::StaticVector<double, Nu> u_prev = (k == 0) ? u_last : U_guess[k-1];
+                            double diff_steer = U_guess[k](0) - u_prev(0);
+                            double diff_accel = U_guess[k](1) - u_prev(1);
+
+                            riccati.R[k](0, 0) += config.R_SteerRate;
+                            riccati.R[k](1, 1) += config.R_AccelRate;
+                            riccati.r[k](0) += config.R_SteerRate * diff_steer;
+                            riccati.r[k](1) += config.R_AccelRate * diff_accel;
+
+                            if (k > 0) {
+                                // 현재 스텝의 변화율 페널티에 대한 이전 스텝(k-1)의 기여도를 체인 룰(Chain Rule)로 분배
+                                riccati.R[k-1](0, 0) += config.R_SteerRate;
+                                riccati.R[k-1](1, 1) += config.R_AccelRate;
+                                riccati.r[k-1](0) -= config.R_SteerRate * diff_steer;
+                                riccati.r[k-1](1) -= config.R_AccelRate * diff_accel;
                             }
+
+                            // Curvature Tracking & Lateral Acceleration
+                            double delta_ff = config.L_wb * config.kappa_ref[k];
+                            double err_steer_track = U_guess[k](0) - delta_ff;
+                            riccati.R[k](0, 0) += config.Q_kappa_track;
+                            riccati.r[k](0) += config.Q_kappa_track * err_steer_track;
+
+                            double v_x = X_pred[k](3);
+                            double r_rate = X_pred[k](5);
+                            double a_y = v_x * r_rate;
+
+                            riccati.q[k](3) += config.Q_ay * a_y * r_rate;
+                            riccati.q[k](5) += config.Q_ay * a_y * v_x;
+
+                            riccati.Q[k](3, 3) += config.Q_ay * r_rate * r_rate;
+                            riccati.Q[k](5, 5) += config.Q_ay * v_x * v_x;
+                            riccati.Q[k](3, 5) += config.Q_ay * v_x * r_rate;
+                            riccati.Q[k](5, 3) += config.Q_ay * v_x * r_rate;
 
                             auto apply_condensed = [&](double c, double J_x0, double J_x1, double J_u0, double J_u1, ConstraintState& cs) {
                                 double J_term = (mu + cs.lam * c) / cs.s;
