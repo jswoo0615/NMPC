@@ -82,7 +82,7 @@ class ReferenceGenerator:
             }
 
         # 4. 공간 다중 패스 필터 (Multi-pass Laplacian Smoothing)
-        raw_x = [waypoint_buffer[i][0].tramsform.location.x for i in range(num_wp)]
+        raw_x = [waypoint_buffer[i][0].transform.location.x for i in range(num_wp)]
         raw_y = [waypoint_buffer[i][0].transform.location.y for i in range(num_wp)]
 
         smooth_x = list(raw_x)
