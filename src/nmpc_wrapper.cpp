@@ -46,33 +46,29 @@ class SparseNMPCWrapper {
             wp_y_ptr = static_cast<double*>(wp_y_buf.ptr);
             obstacle_ptr = static_cast<double*>(obs_buf.ptr);
 
-            // [아키텍트의 수술: 90km/h 주행을 위한 예측/물리 밸런스 완벽 동기화]
-            config.target_vx = 25.0;  // 모델 내부의 마찰원 계산 기준을 현실 속도(90km/h)와 일치시킴
-            
+            config.target_vx = 25.0;  
             config.Q_D = 100.0;       
             config.Q_mu = 50.0;       
             config.Q_Vx = 5.0;        
             config.Q_Vy = 20.0;       
             config.Q_r = 20.0;        
 
-            // 슬립각에 대한 페널티를 자연스러운 물리 현상 수준으로 하향
             config.Q_alpha_f = 200.0;
             config.Q_alpha_r = 200.0;
 
             config.R_Steer = 50.0;    
             config.R_Accel = 1.0;     
-
-            // [Phase 2] 조향 발작 원천 차단: Steer Rate Penalty 강력 주입
-            // 10ms 단위로 핸들을 급격히 꺾는 것에 엄청난 벌금을 매겨, 조향의 기계적 관성을 수학적으로 강제함
             config.R_SteerRate = 5000.0; 
+            config.R_AccelRate = 1000.0;
 
             config.Obstacle_Margin = 0.0;
 
-            // 기계적 한계는 완전히 열어둠. 제약(Constraint)이 아니라 비용(Cost)으로 제어하는 것이 진짜 NMPC.
             config.u_min[0] = -0.6; 
             config.u_max[0] = 0.6;
             config.u_min[1] = -3.0; 
             config.u_max[1] = 3.0;
+
+            nmpc.dt = 0.05; 
         }
 
         void set_target_speed(double speed) {
@@ -80,6 +76,7 @@ class SparseNMPCWrapper {
         }
 
         void update_config(py::dict opt_dict) {
+            if (opt_dict.contains("dt")) nmpc.dt = opt_dict["dt"].cast<double>(); 
             if (opt_dict.contains("Q_D")) config.Q_D = opt_dict["Q_D"].cast<double>();
             if (opt_dict.contains("Q_mu")) config.Q_mu = opt_dict["Q_mu"].cast<double>();
             if (opt_dict.contains("Q_Vx")) config.Q_Vx = opt_dict["Q_Vx"].cast<double>();
@@ -87,6 +84,7 @@ class SparseNMPCWrapper {
             if (opt_dict.contains("R_Steer")) config.R_Steer = opt_dict["R_Steer"].cast<double>();
             if (opt_dict.contains("R_Accel")) config.R_Accel = opt_dict["R_Accel"].cast<double>();
             if (opt_dict.contains("R_SteerRate")) config.R_SteerRate = opt_dict["R_SteerRate"].cast<double>();
+            if (opt_dict.contains("R_AccelRate")) config.R_AccelRate = opt_dict["R_AccelRate"].cast<double>();
         }
 
         struct FrenetState {
@@ -161,7 +159,9 @@ class SparseNMPCWrapper {
 
             if (n < 5) {
                 spline_valid = false;
-                return py::make_tuple("Insufficient Waypoints", py::make_tuple(0.0, -1.0));
+                py::dict empty_monitor;
+                empty_monitor["status"] = "Insufficient Waypoints";
+                return py::make_tuple(empty_monitor, py::make_tuple(0.0, -1.0));
             }
 
             spline.build(wp_x_arr, wp_y_arr, n);
@@ -188,20 +188,14 @@ class SparseNMPCWrapper {
 
             double dt = nmpc.dt;
 
-            // [Phase 1 아키텍트의 수술: 맹인의 시력 회복 (Predictive Curvature Horizon)]
-            // 100 스텝 앞까지의 모든 곡률을 배열에 저장하여 NMPC에 미래 시야를 제공합니다.
-            // [Phase 1 아키텍트의 수술: 맹인의 시력 회복 (Predictive Curvature Horizon)]
             for (std::size_t k = 0; k < H; ++k) {
-                // [수술 부위: 시야 붕괴 방지]
-                // 차량이 정지해 있더라도, 최소 5.0m/s(약 18km/h)로 달릴 때의 거리를 내다보도록 강제합니다.
-                // 제자리에서 핸들을 비비는 환각을 원천 차단합니다.
                 double v_horizon = std::max(5.0, config.target_vx);
                 double s_pred = frenet.s + v_horizon * k * dt;
                 
                 s_pred = std::clamp(s_pred, 0.0, spline.get_max_s());
 
                 double raw_kappa = spline.calc_curvature(s_pred);
-                config.kappa_ref[k] = std::clamp(raw_kappa, -0.2, 0.2); 
+                config.kappa_ref[k] = std::clamp(-raw_kappa, -0.2, 0.2); 
                 config.target_d[k] = 0.0; 
             }
 
@@ -222,8 +216,33 @@ class SparseNMPCWrapper {
                 u_opt.set_zero();
             }
 
+            // [Phase 5 아키텍트의 수술: KKT 수학적 증명 추출]
+            // 솔버가 연산한 가장 가혹한 한계점(Slack)과 그 저항력(Lambda)을 Python으로 전달합니다.
+            py::dict monitor_data;
+            monitor_data["status"] = res.status_msg;
+            monitor_data["kkt_error"] = res.max_kkt_error;
+            monitor_data["sqp_iter"] = res.sqp_iterations;
+
+            double min_slack = 1e6;
+            double max_lam = 0.0;
+            
+            for (std::size_t k = 0; k < H; ++k) {
+                auto check_cs = [&](const auto& cs) {
+                    if (cs.s < min_slack) min_slack = cs.s;
+                    if (cs.lam > max_lam) max_lam = cs.lam;
+                };
+                check_cs(nmpc.duals[k].d_max);
+                check_cs(nmpc.duals[k].d_min);
+                check_cs(nmpc.duals[k].u_max[0]);
+                check_cs(nmpc.duals[k].u_min[0]);
+                check_cs(nmpc.duals[k].u_max[1]);
+                check_cs(nmpc.duals[k].u_min[1]);
+            }
+            monitor_data["min_slack"] = min_slack;
+            monitor_data["max_lambda"] = max_lam;
+
             nmpc.shift_sequence();
-            return py::make_tuple(res.status_msg, py::make_tuple(u_opt(0), u_opt(1)));
+            return py::make_tuple(monitor_data, py::make_tuple(u_opt(0), u_opt(1)));
         }
 };
 
