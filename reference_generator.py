@@ -28,33 +28,34 @@ class ReferenceGenerator:
         dy = ego_state[1] - wp_loc.y
         d_error = abs(-dx * math.sin(wp_yaw_rad) + dy * math.cos(wp_yaw_rad))
 
-        # 2. 미래 곡률 기반 속도 프로파일링 (Lookahead Speed Preview)
-        angle_diff = 0.0 
-        lookahead_idx = min(30, num_wp - 1)
-        if lookahead_idx > 5:
-            wp_now = waypoint_buffer[0][0].transform.get_forward_vector()
-            wp_future = waypoint_buffer[lookahead_idx][0].transform.get_forward_vector()
+        # 2. 다단계 누적 곡률 탐지 (Multi-horizon Accumulated Curvature)
+        # 인접 웨이포인트 쌍의 각도 변화를 개별 측정하고 누적하여
+        # 교차로의 급격한 방향 전환과 완만한 긴 곡선 모두를 감지합니다.
+        max_segment_angle = 0.0
+        accumulated_angle = 0.0
+        scan_range = min(50, num_wp - 1)
+        for i in range(scan_range):
+            v1 = waypoint_buffer[i][0].transform.get_forward_vector()
+            v2 = waypoint_buffer[i + 1][0].transform.get_forward_vector()
+            vec1 = np.array([v1.x, v1.y])
+            vec2 = np.array([v2.x, v2.y])
+            n1 = np.linalg.norm(vec1)
+            n2 = np.linalg.norm(vec2)
+            if n1 > 1e-6 and n2 > 1e-6:
+                dot = np.clip(np.dot(vec1 / n1, vec2 / n2), -1.0, 1.0)
+                seg_angle = math.degrees(math.acos(dot))
+                max_segment_angle = max(max_segment_angle, seg_angle)
+                accumulated_angle += seg_angle
+        # 단일 급회전(교차로)과 완만한 누적 곡선 모두 감지
+        angle_diff = max(max_segment_angle, accumulated_angle * 0.3)
             
-            vec1 = np.array([wp_now.x, wp_now.y])
-            vec2 = np.array([wp_future.x, wp_future.y])
-            norm1 = np.linalg.norm(vec1)
-            norm2 = np.linalg.norm(vec2)
-            
-            vec1 = vec1 / norm1 if norm1 > 1e-6 else vec1
-            vec2 = vec2 / norm2 if norm2 > 1e-6 else vec2
-            
-            dot_prod = np.clip(np.dot(vec1, vec2), -1.0, 1.0)
-            angle_diff = math.degrees(math.acos(dot_prod))
-            
-        # 곡선 구간 속도 프로파일 및 조향 레이트 설정
-        if angle_diff > 15.0:
-            # 곡선 감속: 기존 (angle_diff * 0.4)은 너무 공격적이어서 2.5 m/s까지 떨어졌음
-            # 완화하여 실용적인 곡선 속도를 유지합니다 (하한 8.0 m/s ≈ 29 km/h)
-            raw_target_v = max(8.0, self._base_target_speed - (angle_diff * 0.15))
-            dynamic_R_SteerRate = max(500.0, 1500.0 - (angle_diff * 20.0))
-        else:
-            raw_target_v = self._base_target_speed
-            dynamic_R_SteerRate = 800.0
+        # 연속 함수로 속도 감속 — 불연속 경계(if/else) 제거
+        # angle_diff 5° 이하: 감속 없음, 35° 이상: 최대 감속, 그 사이 선형 보간
+        speed_reduction_factor = min(1.0, max(0.0, (angle_diff - 5.0) / 30.0))
+        raw_target_v = self._base_target_speed - speed_reduction_factor * (self._base_target_speed - 6.0)
+        raw_target_v = max(6.0, raw_target_v)
+        dynamic_R_SteerRate = 1200.0 - speed_reduction_factor * 700.0
+        dynamic_R_SteerRate = max(300.0, dynamic_R_SteerRate)
             
         if self._smoothed_target_v is None:
             self._smoothed_target_v = max(5.0, vx) 
@@ -66,6 +67,9 @@ class ReferenceGenerator:
         # 3. Adaptive KKT Weights (curvature‑aware)
         curvature_factor = 1.0
         steer_penalty = 10.0 
+        # Q_kappa_track: 곡률이 큰 구간에서는 곡률 추종 페널티를 줄여
+        # Q_D(횡오차 보정)와의 충돌을 방지합니다.
+        q_kappa_track = max(200.0, 1500.0 - angle_diff * 30.0)
         if angle_diff > 20.0:
             curvature_factor = 2.0
             steer_penalty = 150.0
@@ -79,6 +83,7 @@ class ReferenceGenerator:
                 'R_SteerRate': float(dynamic_R_SteerRate),
                 'R_Accel': 100.0,
                 'R_AccelRate': 2000.0,
+                'Q_kappa_track': q_kappa_track,
                 'target_speed': self._smoothed_target_v
             }
         else:
@@ -91,6 +96,7 @@ class ReferenceGenerator:
                 'R_SteerRate': float(dynamic_R_SteerRate),
                 'R_Accel': 50.0,
                 'R_AccelRate': 1000.0,
+                'Q_kappa_track': q_kappa_track,
                 'target_speed': self._smoothed_target_v
             }
 

@@ -145,6 +145,15 @@ class LocalPlanner(object):
 
         self._nmpc_solver.update_config(adaptive_opt)
         self._nmpc_solver.set_target_speed(adaptive_opt['target_speed'])
+
+        # 초기 warm-up 보호: 처음 10회 풀이 동안은 저속 추종
+        # Frenet 프로젝션과 NMPC warm-start가 안정화될 시간을 확보합니다.
+        if not hasattr(self, '_warmup_count'):
+            self._warmup_count = 0
+        self._warmup_count += 1
+        if self._warmup_count <= 10:
+            clamped_speed = min(adaptive_opt.get('target_speed', 5.0), 5.0)
+            self._nmpc_solver.set_target_speed(clamped_speed)
         
         for i in range(num_wp):
             self._wp_x[i] = ref_x[i]
@@ -176,8 +185,14 @@ class LocalPlanner(object):
 
         control = carla.VehicleControl()
         control.steer = float(np.clip(steer_norm, -1.0, 1.0))
-        control.throttle = float(np.clip(accel / 5.0, 0.0, 1.0)) if accel >= 0.0 else 0.0
-        control.brake = float(np.clip(abs(accel) / 10.0, 0.0, 1.0)) if accel < 0.0 else 0.0
+        # 가속/감속 대칭 매핑: 양쪽 모두 /5.0으로 통일하여
+        # NMPC 모델과 CARLA 차량 응답의 불일치를 제거합니다.
+        if accel >= 0.0:
+            control.throttle = float(np.clip(accel / 5.0, 0.0, 1.0))
+            control.brake = 0.0
+        else:
+            control.throttle = 0.0
+            control.brake = float(np.clip(abs(accel) / 5.0, 0.0, 1.0))
         
         if debug:
             draw_waypoints(self._vehicle.get_world(), [self._waypoint_buffer[0][0]], transform.location.z + 1.0)
