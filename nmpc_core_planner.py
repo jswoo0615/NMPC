@@ -80,6 +80,17 @@ class LocalPlanner(object):
         self._global_plan = True
     
     def run_step(self, debug=True):
+        # [근본 수술] NMPC 솔버 데시메이션 (Solve Decimation)
+        # CARLA의 물리 dt(0.01s, 100Hz)와 NMPC 내부 예측 dt(0.05s, 20Hz)가 5배 불일치합니다.
+        # 매 틱(0.01s)마다 NMPC를 재풀이하면 수치적으로 미세하게 다른 해가 나와 잔진동의 원인이 됩니다.
+        # NMPC를 내부 dt에 맞춰 5틱(0.05s)마다 한 번만 풀고, 사이에는 이전 제어값을 유지합니다(Zero-Order Hold).
+        if not hasattr(self, '_solve_counter'):
+            self._solve_counter = -1
+            self._cached_control = carla.VehicleControl(steer=0.0, throttle=0.0, brake=0.0)
+
+        self._solve_counter += 1
+
+        # 웨이포인트 버퍼 보충 (매 틱)
         if not self._global_plan and len(self._waypoints_queue) < self.MAX_WP_BUFFER:
             self._compute_next_waypoints(k=100)
         
@@ -88,6 +99,13 @@ class LocalPlanner(object):
 
         if len(self._waypoint_buffer) == 0:
             return carla.VehicleControl(steer=0.0, throttle=0.0, brake=1.0)
+
+        # 5틱마다 한 번만 NMPC 풀이 (Zero-Order Hold)
+        SOLVE_EVERY_N = 5
+        if self._solve_counter % SOLVE_EVERY_N != 0:
+            return self._cached_control
+
+        # --- 이하: 0.05초마다 한 번 실행 (20Hz) ---
         
         transform = self._vehicle.get_transform()
         min_dist = float('inf')
@@ -144,19 +162,25 @@ class LocalPlanner(object):
         if not hasattr(self, '_last_steer_rad'):
             self._last_steer_rad = raw_steer
         
+        # 데시메이션(ZOH)이 고주파 잡음을 구조적으로 제거하므로
+        # 인위적인 LPF 없이 rate-limit만 남겨 안전을 보장합니다.
         max_delta = 0.05 
         steer_rad = np.clip(raw_steer, self._last_steer_rad - max_delta, self._last_steer_rad + max_delta)
-        steer_rad = (0.05 * steer_rad) + (0.95 * self._last_steer_rad)
         self._last_steer_rad = steer_rad
         
-        # 로그 출력부: Slack이 0.1 미만으로 떨어지거나 Lam이 급증하면 솔버가 제약을 '방어' 중인 상태입니다.
+        # 로그 출력부
         print(f"[{status}|Iter:{sqp_iter}|KKT:{kkt_err:.3f}|Slack:{min_slack:.3f}|Lam:{max_lam:.1f}] Steer: {steer_rad:+.3f} rad | Accel: {accel:+.3f} m/s^2 | Speed: {vx:+.1f} m/s")
         
+        MAX_STEER_PHYSICS = 1.22 
+        steer_norm = steer_rad / MAX_STEER_PHYSICS
+
         control = carla.VehicleControl()
-        control.steer = float(np.clip(steer_rad / 0.5, -1.0, 1.0))
+        control.steer = float(np.clip(steer_norm, -1.0, 1.0))
         control.throttle = float(np.clip(accel / 5.0, 0.0, 1.0)) if accel >= 0.0 else 0.0
         control.brake = float(np.clip(abs(accel) / 10.0, 0.0, 1.0)) if accel < 0.0 else 0.0
         
         if debug:
             draw_waypoints(self._vehicle.get_world(), [self._waypoint_buffer[0][0]], transform.location.z + 1.0)
+        
+        self._cached_control = control
         return control
