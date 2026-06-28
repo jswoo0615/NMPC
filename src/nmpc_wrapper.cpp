@@ -50,8 +50,8 @@ class SparseNMPCWrapper {
             config.Q_D = 100.0;       
             config.Q_mu = 50.0;       
             config.Q_Vx = 5.0;        
-            config.Q_Vy = 20.0;       
-            config.Q_r = 20.0;        
+            config.Q_Vy = 1.0;       
+            config.Q_r = 1.0;        
 
             config.Q_alpha_f = 200.0;
             config.Q_alpha_r = 200.0;
