@@ -64,41 +64,48 @@ class ReferenceGenerator:
         alpha_v = 0.2
         self._smoothed_target_v = (alpha_v * raw_target_v) + ((1.0 - alpha_v) * self._smoothed_target_v)
 
-        # 3. Adaptive KKT Weights (curvature‑aware)
+        # 3. Adaptive KKT Weights (curvature‑aware + lane-change-aware)
         curvature_factor = 1.0
         steer_penalty = 10.0 
         # Q_kappa_track: 곡률이 큰 구간에서는 곡률 추종 페널티를 줄여
         # Q_D(횡오차 보정)와의 충돌을 방지합니다.
         q_kappa_track = max(200.0, 1500.0 - angle_diff * 30.0)
+
+        # [차선 변경 감지] 직선 구간에서 d_error가 큰 경우 = 차선 변경 중
+        # Q_kappa_track이 조향을 0으로 강제 고정하는 것을 완화하여
+        # 솔버가 횡방향 보정을 위한 조향을 생성할 수 있도록 합니다.
+        # d_error 0.3m부터 감소 시작, 1.5m 이상이면 최대 80% 감소
+        d_error_lane_change = min(1.0, max(0.0, (d_error - 0.3) / 1.2))
+        q_kappa_track = q_kappa_track * (1.0 - 0.8 * d_error_lane_change)
+
         if angle_diff > 20.0:
             curvature_factor = 2.0
             steer_penalty = 150.0
             dynamic_R_SteerRate = max(300.0, dynamic_R_SteerRate * 0.5)
 
-        if d_error > 0.2:
-            adaptive_opt = {
-                'dt': 0.05,
-                'Q_D': 200.0,
-                'R_Steer': steer_penalty,
-                'R_SteerRate': float(dynamic_R_SteerRate),
-                'R_Accel': 100.0,
-                'R_AccelRate': 2000.0,
-                'Q_kappa_track': q_kappa_track,
-                'target_speed': self._smoothed_target_v
-            }
-        else:
-            adaptive_opt = {
-                'dt': 0.05,
-                # Q_D 80→150: 차선 변경 시에도 경로를 놓치지 않을 정도의 추종력 확보
-                # (잔진동은 solve decimation이 처리하므로 Q_D를 올려도 안전)
-                'Q_D': 150.0,
-                'R_Steer': steer_penalty,
-                'R_SteerRate': float(dynamic_R_SteerRate),
-                'R_Accel': 50.0,
-                'R_AccelRate': 1000.0,
-                'Q_kappa_track': q_kappa_track,
-                'target_speed': self._smoothed_target_v
-            }
+        # Q_D 및 R_Accel/R_AccelRate: 연속 함수로 전환 (if/else 불연속 제거)
+        # d_error가 커질수록 횡오차 보정 가중치를 점진적으로 올립니다.
+        # 이전의 d_error > 0.2 이진 분기는 "머뭇거림 → 급전환" 패턴의 원인이었습니다.
+        d_blend = min(1.0, max(0.0, (d_error - 0.1) / 0.4))  # 0.1m~0.5m 사이 선형 보간
+        q_d_val = 150.0 + d_blend * 50.0          # 150 → 200
+        r_accel_val = 50.0 + d_blend * 50.0       # 50 → 100
+        r_accel_rate_val = 1000.0 + d_blend * 1000.0  # 1000 → 2000
+
+        # 차선 변경 시 R_SteerRate도 완화: 솔버가 조향 변화를 허용하도록
+        if d_error_lane_change > 0.1:
+            dynamic_R_SteerRate = dynamic_R_SteerRate * (1.0 - 0.5 * d_error_lane_change)
+            dynamic_R_SteerRate = max(200.0, dynamic_R_SteerRate)
+
+        adaptive_opt = {
+            'dt': 0.05,
+            'Q_D': q_d_val,
+            'R_Steer': steer_penalty,
+            'R_SteerRate': float(dynamic_R_SteerRate),
+            'R_Accel': r_accel_val,
+            'R_AccelRate': r_accel_rate_val,
+            'Q_kappa_track': q_kappa_track,
+            'target_speed': self._smoothed_target_v
+        }
 
         # 4. 공간 다중 패스 필터 (Multi-pass Laplacian Smoothing)
         raw_x = [waypoint_buffer[i][0].transform.location.x for i in range(num_wp)]
