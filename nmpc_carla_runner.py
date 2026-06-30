@@ -148,6 +148,15 @@ def run_scenario(client, world, start_idx=None, end_idx=None,
         
         ego_vehicle = world.spawn_actor(ego_bp, spawn_point)
         
+        # 메트릭 수집을 위한 충돌 센서 장착
+        collision_sensor = None
+        if metrics:
+            collision_bp = blueprint_library.find('sensor.other.collision')
+            collision_sensor = world.spawn_actor(collision_bp, carla.Transform(), attach_to=ego_vehicle)
+            def on_collision(event):
+                metrics.collision_detected = True
+            collision_sensor.listen(on_collision)
+        
         print("Waking up Physics Engine and setting suspension")
         for _ in range(20):
             world.tick()
@@ -164,7 +173,19 @@ def run_scenario(client, world, start_idx=None, end_idx=None,
         route = grp.trace_route(ego_vehicle.get_location(), destination)
         global_plan = [wp for wp, _ in route]
         
-        print(f"Route: Spawn[{start_idx}] → Spawn[{end_idx}], {len(global_plan)} waypoints")
+        # 경로 총 거리 계산 및 동적 Timeout 설정
+        total_dist = 0.0
+        for i in range(1, len(global_plan)):
+            l0 = global_plan[i-1].transform.location
+            l1 = global_plan[i].transform.location
+            total_dist += math.hypot(l1.x - l0.x, l1.y - l0.y)
+            
+        # 평균 8m/s (약 29 km/h) 주행 가정 + 60초 여유 버퍼 추가
+        needed_ticks = int((total_dist / 8.0) * 100) + 6000
+        max_ticks = max(max_ticks, needed_ticks)
+        
+        print(f"Route: Spawn[{start_idx}] → Spawn[{end_idx}], {len(global_plan)} waypoints ({total_dist:.1f}m)")
+        print(f"Dynamic Timeout set to {max_ticks} ticks")
         
         # 3. NMPC Local Planner 초기화
         opt_dict = {
@@ -212,6 +233,15 @@ def run_scenario(client, world, start_idx=None, end_idx=None,
             control = nmpc_planner.run_step(debug=True)
             ego_vehicle.apply_control(control)
             
+            # 메트릭 정보 수집
+            if metrics:
+                status = getattr(nmpc_planner, 'last_status', 'OK')
+                kkt_err = getattr(nmpc_planner, 'last_kkt_err', 0.0)
+                steer = control.steer
+                accel = getattr(nmpc_planner, 'last_accel', 0.0)
+                speed = getattr(nmpc_planner, 'last_vx', 0.0)
+                metrics.update(status, kkt_err, steer, accel, speed)
+            
             # 종료 조건
             if len(nmpc_planner._waypoint_queue) == 0 and len(nmpc_planner._waypoint_buffer) <= 5:
                 print("Destination Reached. NMPC Execution Terminated")
@@ -232,6 +262,8 @@ def run_scenario(client, world, start_idx=None, end_idx=None,
         print("Cleaning up resources...")
         world.apply_settings(original_settings)
         
+        if collision_sensor is not None:
+            collision_sensor.destroy()
         if ego_vehicle is not None:
             ego_vehicle.destroy()
         
