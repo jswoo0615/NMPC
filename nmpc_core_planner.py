@@ -158,19 +158,28 @@ class LocalPlanner(object):
         )
 
         self._nmpc_solver.update_config(adaptive_opt)
-        self._nmpc_solver.set_target_speed(adaptive_opt['target_speed'])
 
-        if not hasattr(self, '_warmup_count'):
-            self._warmup_count = 0
-        self._warmup_count += 1
-        if self._warmup_count <= 10:
-            clamped_speed = min(adaptive_opt.get('target_speed', 5.0), 5.0)
-            self._nmpc_solver.set_target_speed(clamped_speed)
+        if not hasattr(self, '_solve_count_internal'):
+            self._solve_count_internal = 0
+        self._solve_count_internal += 1
+        
+        # 급발진/급조향 방지를 위한 초기 가감속 Ramping (2초간 속도 선형 증가)
+        ramp_steps = 40
+        base_speed = 2.0  # 부드러운 출발 속도 (m/s)
+        target_v = adaptive_opt['target_speed']
+        
+        if self._solve_count_internal < ramp_steps:
+            ramp_factor = self._solve_count_internal / ramp_steps
+            startup_target = base_speed + ramp_factor * (target_v - base_speed)
+            self._nmpc_solver.set_target_speed(startup_target)
+        else:
+            self._nmpc_solver.set_target_speed(target_v)
         
         for i in range(num_wp):
             self._wp_x[i] = ref_x[i]
             self._wp_y[i] = ref_y[i]
 
+        # [Phase 5 아키텍트의 수술: KKT Monitor 대시보드]
         monitor_data, (raw_steer, accel) = self._nmpc_solver.solve(num_wp)
         
         status = monitor_data.get('status', 'ERROR')
@@ -178,6 +187,13 @@ class LocalPlanner(object):
         sqp_iter = monitor_data.get('sqp_iter', 0)
         min_slack = monitor_data.get('min_slack', 0.0)
         max_lam = monitor_data.get('max_lambda', 0.0)
+        
+        # 외부 메트릭 로깅용 멤버 변수 업데이트
+        self.last_status = status
+        self.last_kkt_err = kkt_err
+        self.last_steer = raw_steer
+        self.last_accel = accel
+        self.last_vx = vx
         
         if not hasattr(self, '_last_steer_rad'):
             self._last_steer_rad = raw_steer
