@@ -210,12 +210,33 @@ class LocalPlanner(object):
         control = carla.VehicleControl()
         control.steer = float(np.clip(steer_norm, -1.0, 1.0))
 
-        if accel >= 0.0:
-            control.throttle = float(np.clip(accel / 5.0, 0.0, 1.0))
+        # [아키텍트의 수술: 오르막길(Pitch) 중력 보상 Feed-Forward]
+        pitch_rad = math.radians(transform.rotation.pitch)
+        gravity_accel = 9.81 * math.sin(pitch_rad)
+        net_accel = accel + gravity_accel
+
+        if net_accel >= 0.0:
+            control.throttle = float(np.clip(net_accel / 5.0, 0.0, 1.0))
             control.brake = 0.0
         else:
             control.throttle = 0.0
-            control.brake = float(np.clip(abs(accel) / 5.0, 0.0, 1.0))
+            control.brake = float(np.clip(abs(net_accel) / 5.0, 0.0, 1.0))
+            
+        # [아키텍트의 수술: 수동 기어 변속 (오르막길 토크 상실 및 변속 충격 방지)]
+        control.manual_gear_shift = True
+        speed_kmh = vx * 3.6
+        if vx < -0.1:
+            control.gear = -1
+        elif speed_kmh < 25.0:
+            control.gear = 1
+        elif speed_kmh < 45.0:
+            control.gear = 2
+        elif speed_kmh < 65.0:
+            control.gear = 3
+        elif speed_kmh < 85.0:
+            control.gear = 4
+        else:
+            control.gear = 5
         
         if debug:
             draw_waypoints(self._vehicle.get_world(), [self._waypoint_buffer[0][0]], transform.location.z + 1.0)
