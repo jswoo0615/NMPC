@@ -12,6 +12,57 @@ A high-performance Nonlinear Model Predictive Control (NMPC) core and Local Plan
 * **Easy validation** in CARLA
 * **Quantitative evaluation** through repeatable stress-testing
 
+## Architecture & Dependencies
+
+The following dependency graph illustrates the relationship between the Python scripts, the C++ NMPC core, and the CARLA simulator.
+
+```mermaid
+graph TD
+    classDef py fill:#3572A5,color:#fff,stroke:#fff,stroke-width:2px;
+    classDef cpp fill:#f34b7d,color:#fff,stroke:#fff,stroke-width:2px;
+    classDef sim fill:#1b1e23,color:#fff,stroke:#00d2ff,stroke-width:3px;
+    classDef log fill:#f1e05a,color:#000,stroke:#333,stroke-width:2px;
+    
+    subgraph Execution & Testing
+        StressTest[nmpc_stress_test.py]:::py
+        Runner[nmpc_carla_runner.py]:::py
+        Analyzer[analyze_stress_results.py]:::py
+    end
+    
+    subgraph Controller Logic
+        CorePlanner[nmpc_core_planner.py]:::py
+        RefGen[reference_generator.py]:::py
+    end
+    
+    subgraph C++ Backend
+        NMPCCore[nmpc_core wrapper]:::cpp
+        CPPSrc[C++ Source & Headers]:::cpp
+    end
+    
+    subgraph Utilities
+        Inspector[carla_route_inspector.py]:::py
+    end
+    
+    CARLA((CARLA Simulator)):::sim
+    LogData[(JSON Logs)]:::log
+    
+    %% Relationships
+    StressTest -->|Calls run_scenario| Runner
+    StressTest -->|Outputs| LogData
+    Analyzer -->|Reads| LogData
+    
+    Runner -->|Uses LocalPlanner| CorePlanner
+    Runner <-->|Vehicle State & Control| CARLA
+    
+    CorePlanner -->|Generates Reference| RefGen
+    CorePlanner -->|Passes State to Solver| NMPCCore
+    CorePlanner <-->|Waypoints| CARLA
+    
+    NMPCCore -.->|Compiled via pybind11| CPPSrc
+    
+    Inspector <-->|Queries Map & Routes| CARLA
+```
+
 ## Features
 - **High-Performance C++ Backend**: The NMPC solver is written in C++ with performance-oriented optimizations (`-O3`, `-ffast-math`, LTO) for hard real-time constraints.
 - **Python Binding**: Seamlessly integrated into Python using `pybind11`, allowing easy interface with the CARLA Python API.
