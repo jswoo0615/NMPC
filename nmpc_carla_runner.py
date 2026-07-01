@@ -346,8 +346,8 @@ def main():
                         help='도착 Spawn Point 인덱스')
     parser.add_argument('--map', type=str, default=None,
                         help='CARLA 맵 이름 (예: Town04)')
-    parser.add_argument('--speed', type=float, default=50.0,
-                        help='목표 속도 (km/h, 기본 50)')
+    parser.add_argument('--speed', type=float, default=60.0,
+                        help='목표 속도 (km/h, 기본 60)')
     parser.add_argument('--host', type=str, default='127.0.0.1',
                         help='CARLA 서버 호스트')
     parser.add_argument('--port', type=int, default=2000,

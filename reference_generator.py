@@ -52,8 +52,9 @@ class ReferenceGenerator:
         # 연속 함수로 속도 감속 — 불연속 경계(if/else) 제거
         # angle_diff 5° 이하: 감속 없음, 35° 이상: 최대 감속, 그 사이 선형 보간
         speed_reduction_factor = min(1.0, max(0.0, (angle_diff - 5.0) / 30.0))
-        raw_target_v = self._base_target_speed - speed_reduction_factor * (self._base_target_speed - 6.0)
-        raw_target_v = max(6.0, raw_target_v)
+        min_speed_ms = 20.0 / 3.6  # 최저 속도 20 km/h
+        raw_target_v = self._base_target_speed - speed_reduction_factor * (self._base_target_speed - min_speed_ms)
+        raw_target_v = max(min_speed_ms, raw_target_v)
         dynamic_R_SteerRate = 1200.0 - speed_reduction_factor * 700.0
         dynamic_R_SteerRate = max(300.0, dynamic_R_SteerRate)
             

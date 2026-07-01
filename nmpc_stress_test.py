@@ -419,8 +419,8 @@ def main():
                         help='특정 교차로 ID만 타겟')
     parser.add_argument('--min-angle', type=float, default=60.0,
                         help='최소 방향변화 각도 (기본 60°)')
-    parser.add_argument('--speed', type=float, default=50.0,
-                        help='목표 속도 (km/h, 기본 50)')
+    parser.add_argument('--speed', type=float, default=60.0,
+                        help='목표 속도 (km/h, 기본 60)')
     parser.add_argument('--max-ticks', type=int, default=20000,
                         help='경로당 최대 틱 수 (기본 20000)')
     parser.add_argument('--output', type=str, default=None,
