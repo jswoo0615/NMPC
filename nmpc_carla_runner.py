@@ -27,6 +27,7 @@ import time
 import math
 import argparse
 import numpy as np
+import csv
 import carla
 
 # CARLA AGENTS 경로 추가
@@ -68,6 +69,7 @@ class RunMetrics:
         self.max_steer_rate = 0.0
         self.collision_detected = False
         self.completed = False
+        self.error = 'UNKNOWN'
         self.start_time = time.time()
         self.steer_history = []
         self.speed_history = []
@@ -75,7 +77,7 @@ class RunMetrics:
 
     def update(self, status, kkt_err, steer, accel, speed):
         self.tick_count += 1
-        if 'Fallback' in status:
+        if 'Fallback' in status or 'FALLBACK' in status:
             self.fallback_count += 1
         self.max_kkt_error = max(self.max_kkt_error, kkt_err)
         self.steer_history.append(steer)
@@ -93,6 +95,7 @@ class RunMetrics:
         
         return {
             'completed': self.completed,
+            'error': self.error,
             'elapsed_sec': round(elapsed, 1),
             'sim_ticks': self.tick_count,
             'fallback_count': self.fallback_count,
@@ -105,16 +108,12 @@ class RunMetrics:
 
 
 def run_scenario(client, world, start_idx=None, end_idx=None, 
-                 target_speed=50.0, max_ticks=30000, collect_metrics=False):
+                 target_speed=50.0, max_ticks=30000, collect_metrics=False, log_dir=None):
     """
     단일 시나리오를 실행합니다.
-    
-    Returns:
-        metrics_dict if collect_metrics=True, else None
     """
     spawn_points = world.get_map().get_spawn_points()
     
-    # Spawn Point 결정
     if start_idx is not None:
         if start_idx < 0 or start_idx >= len(spawn_points):
             raise ValueError(f"start_idx {start_idx}가 범위 밖 (0~{len(spawn_points)-1})")
@@ -130,7 +129,6 @@ def run_scenario(client, world, start_idx=None, end_idx=None,
     else:
         destination = random.choice(spawn_points).location
     
-    # 동기화 모드 설정
     settings = world.get_settings()
     original_settings = world.get_settings()
     settings.synchronous_mode = True
@@ -139,16 +137,21 @@ def run_scenario(client, world, start_idx=None, end_idx=None,
     
     ego_vehicle = None
     metrics = RunMetrics() if collect_metrics else None
+    csv_file = None
+    csv_writer = None
     
     try:
-        # 1. Ego Vehicle Spawn
+        if log_dir is not None:
+            csv_file = open(os.path.join(log_dir, 'solver_log.csv'), 'w', newline='')
+            csv_writer = csv.writer(csv_file)
+            csv_writer.writerow(['tick', 'x', 'y', 'speed_ms', 'steer', 'accel', 'kkt_error', 'min_slack', 'max_lam', 'solver_status'])
+
         blueprint_library = world.get_blueprint_library()
         ego_bp = blueprint_library.filter('vehicle.tesla.model3')[0]
         ego_bp.set_attribute('role_name', 'ego')
         
         ego_vehicle = world.spawn_actor(ego_bp, spawn_point)
         
-        # 메트릭 수집을 위한 충돌 센서 장착
         collision_sensor = None
         if metrics:
             collision_bp = blueprint_library.find('sensor.other.collision')
@@ -168,26 +171,22 @@ def run_scenario(client, world, start_idx=None, end_idx=None,
         ego_vehicle.apply_control(wake_up_control)
         world.tick()
         
-        # 2. 경로 생성
         grp = GlobalRoutePlanner(world.get_map(), 2.0)
         route = grp.trace_route(ego_vehicle.get_location(), destination)
         global_plan = [wp for wp, _ in route]
         
-        # 경로 총 거리 계산 및 동적 Timeout 설정
         total_dist = 0.0
         for i in range(1, len(global_plan)):
             l0 = global_plan[i-1].transform.location
             l1 = global_plan[i].transform.location
             total_dist += math.hypot(l1.x - l0.x, l1.y - l0.y)
             
-        # 평균 8m/s (약 29 km/h) 주행 가정 + 60초 여유 버퍼 추가
         needed_ticks = int((total_dist / 8.0) * 100) + 6000
         max_ticks = max(max_ticks, needed_ticks)
         
         print(f"Route: Spawn[{start_idx}] → Spawn[{end_idx}], {len(global_plan)} waypoints ({total_dist:.1f}m)")
         print(f"Dynamic Timeout set to {max_ticks} ticks")
         
-        # 3. NMPC Local Planner 초기화
         opt_dict = {
             'target_speed': target_speed,
             'dt': 0.01
@@ -198,10 +197,10 @@ def run_scenario(client, world, start_idx=None, end_idx=None,
         
         print("NMPC Engine Initialized. Engaging Closed-loop Control")
         
-        # 4. Main Control Loop
         spectator = world.get_spectator()
         cam_transform = spectator.get_transform()
         tick = 0
+        consecutive_fallbacks = 0
         
         while tick < max_ticks:
             world.tick()
@@ -233,24 +232,79 @@ def run_scenario(client, world, start_idx=None, end_idx=None,
             control = nmpc_planner.run_step(debug=True)
             ego_vehicle.apply_control(control)
             
-            # 메트릭 정보 수집
-            if metrics:
-                status = getattr(nmpc_planner, 'last_status', 'OK')
-                kkt_err = getattr(nmpc_planner, 'last_kkt_err', 0.0)
-                steer = control.steer
-                accel = getattr(nmpc_planner, 'last_accel', 0.0)
-                speed = getattr(nmpc_planner, 'last_vx', 0.0)
-                metrics.update(status, kkt_err, steer, accel, speed)
+            kkt_err = 0.0
+            min_slack = 0.0
+            max_lam = 0.0
+            status_msg = "UNKNOWN"
             
-            # 종료 조건
+            if hasattr(nmpc_planner, 'latest_metrics'):
+                m_data = nmpc_planner.latest_metrics
+                kkt_err = m_data.get('kkt_error', 0.0)
+                min_slack = m_data.get('min_slack', 0.0)
+                max_lam = m_data.get('max_lambda', 0.0)
+                status_msg = m_data.get('status', 'ERROR')
+            else:
+                status_msg = getattr(nmpc_planner, 'last_status', 'OK')
+                kkt_err = getattr(nmpc_planner, 'last_kkt_err', 0.0)
+                
+            steer = control.steer
+            accel_val = control.throttle - control.brake
+            current_vel = ego_vehicle.get_velocity()
+            speed = math.hypot(current_vel.x, current_vel.y)
+            
+            if metrics:
+                metrics.update(status_msg, kkt_err, steer, accel_val, speed)
+            
+            if csv_writer:
+                csv_writer.writerow([
+                    tick, transform.location.x, transform.location.y, speed,
+                    steer, accel_val, kkt_err, min_slack, max_lam, status_msg
+                ])
+
+            if metrics and metrics.collision_detected:
+                metrics.completed = False
+                metrics.error = 'COLLISION'
+                break
+                
+            if status_msg == 'FALLBACK':
+                consecutive_fallbacks += 1
+                if consecutive_fallbacks > 10:
+                    if metrics:
+                        metrics.completed = False
+                        metrics.error = 'SOLVER_FAIL'
+                    break
+            else:
+                consecutive_fallbacks = 0
+                
+            # [아키텍트의 수술: 유클리디안 거리 제거, 크로스 트랙 에러 및 유예 기간 적용]
+            if tick > 50 and len(nmpc_planner._waypoint_buffer) > 0:
+                wp_transform = nmpc_planner._waypoint_buffer[0][0].transform
+                wp_loc = wp_transform.location
+                wp_yaw_rad = math.radians(wp_transform.rotation.yaw)
+                
+                dx = transform.location.x - wp_loc.x
+                dy = transform.location.y - wp_loc.y
+                
+                cross_track_error = abs(-dx * math.sin(wp_yaw_rad) + dy * math.cos(wp_yaw_rad))
+                
+                if cross_track_error > 4.0:
+                    if metrics:
+                        metrics.completed = False
+                        metrics.error = 'OFF_ROUTE'
+                    break
+            
             if len(nmpc_planner._waypoint_queue) == 0 and len(nmpc_planner._waypoint_buffer) <= 5:
                 print("Destination Reached. NMPC Execution Terminated")
                 if metrics:
                     metrics.completed = True
+                    metrics.error = 'NONE'
                 break
         
         if tick >= max_ticks:
             print(f"Timeout: {max_ticks} ticks에 도달. 강제 종료.")
+            if metrics:
+                metrics.completed = False
+                metrics.error = 'TIMEOUT'
         
     except KeyboardInterrupt:
         print("\nSimulation interrupted by user.")
@@ -258,16 +312,21 @@ def run_scenario(client, world, start_idx=None, end_idx=None,
         print(f"\nSimulation failed: {e}")
         import traceback
         traceback.print_exc()
+        if metrics:
+            metrics.completed = False
+            metrics.error = f'EXCEPTION: {str(e)}'
     finally:
         print("Cleaning up resources...")
         world.apply_settings(original_settings)
         
+        if csv_file:
+            csv_file.close()
+            
         if collision_sensor is not None:
             collision_sensor.destroy()
         if ego_vehicle is not None:
             ego_vehicle.destroy()
         
-        # 다음 시나리오를 위한 안정화 대기
         for _ in range(10):
             try:
                 world.tick()
@@ -305,7 +364,6 @@ def main():
     
     world = client.get_world()
     
-    # 시나리오 로드
     start_idx = args.start
     end_idx = args.end
     
