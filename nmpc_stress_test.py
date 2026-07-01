@@ -31,6 +31,7 @@ import random
 import argparse
 from datetime import datetime
 from collections import defaultdict
+import csv
 
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'carla'))
@@ -256,28 +257,42 @@ class JunctionScanner:
         
         return junctions
 
-
 def run_stress_test(client, world, routes, target_speed=50.0, max_ticks_per_run=20000):
     """
-    발견된 고위험 경로들을 순차적으로 실행하고 결과를 수집합니다.
+    발견된 고위험 경로들을 순차적으로 실행하고 결과를 시나리오별 폴더에 완벽히 격리 수집합니다.
     """
     total = len(routes)
     results = []
     
+    # [아키텍트의 수술 1: 세션 디렉토리 아키텍처 생성]
+    session_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+    base_dir = os.path.join(os.getcwd(), "results", f"session_{session_time}")
+    os.makedirs(base_dir, exist_ok=True)
+    
     print(f"\n{'='*70}")
     print(f" NMPC Stress Test 시작: {total}개 경로")
-    print(f" 목표 속도: {target_speed} km/h, 최대 틱/경로: {max_ticks_per_run}")
+    print(f" 저장소: {base_dir}")
     print(f"{'='*70}\n")
     
     for i, route_info in enumerate(routes):
         s_idx = route_info['start_idx']
         e_idx = route_info['end_idx']
         
+        # [아키텍트의 수술 2: 개별 시나리오 폴더 생성]
+        scenario_name = f"scenario_{i:03d}_S{s_idx}_E{e_idx}"
+        scenario_dir = os.path.join(base_dir, scenario_name)
+        os.makedirs(scenario_dir, exist_ok=True)
+        
         print(f"\n{'━'*70}")
-        print(f" [{i+1}/{total}] Spawn[{s_idx}] → Spawn[{e_idx}]")
-        print(f" 난이도: max_angle={route_info['max_turn_angle']:+.1f}°, "
-              f"hard_junctions={route_info['num_hard_junctions']}")
+        print(f" [{i+1}/{total}] {scenario_name}")
+        print(f" 난이도: max_angle={route_info['max_turn_angle']:+.1f}°")
         print(f"{'━'*70}")
+        
+        # [아키텍트의 팁: CARLA Native Recorder (Video 대체)]
+        # mp4 녹화 대신 CARLA의 .log를 저장하면, 나중에 시뮬레이터에서 
+        # 자유로운 카메라 시점으로 완벽한 3D 리플레이가 가능합니다.
+        recorder_file = os.path.join(scenario_dir, "carla_replay.log")
+        client.start_recorder(recorder_file)
         
         try:
             metrics = run_scenario(
@@ -286,50 +301,55 @@ def run_stress_test(client, world, routes, target_speed=50.0, max_ticks_per_run=
                 end_idx=e_idx,
                 target_speed=target_speed,
                 max_ticks=max_ticks_per_run,
-                collect_metrics=True
+                collect_metrics=True,
+                log_dir=scenario_dir  # run_scenario 내부에서 solver_log.csv를 쓰도록 경로 전달
             )
+            
+            client.stop_recorder()
             
             if metrics is None:
                 metrics = {'completed': False, 'error': 'No metrics returned'}
             
-            metrics['route_idx'] = i
-            metrics['start_spawn'] = s_idx
-            metrics['end_spawn'] = e_idx
-            metrics['max_turn_angle'] = route_info['max_turn_angle']
-            metrics['num_hard_junctions'] = route_info['num_hard_junctions']
-            metrics['total_dist'] = route_info['total_dist']
-            
-            results.append(metrics)
-            
-            # 중간 결과 출력
-            status = "✅ PASS" if metrics.get('completed', False) else "❌ FAIL"
-            print(f"\n  결과: {status}")
-            print(f"  Fallback: {metrics.get('fallback_count', 'N/A')}회, "
-                  f"MaxKKT: {metrics.get('max_kkt_error', 'N/A')}, "
-                  f"MaxSteerRate: {metrics.get('max_steer_rate', 'N/A')}")
-        
-        except KeyboardInterrupt:
-            print("\n\n사용자에 의한 스트레스 테스트 중단.")
-            break
-        except Exception as e:
-            print(f"\n  ❌ ERROR: {e}")
-            results.append({
+            # 메트릭 데이터 보강
+            metrics.update({
                 'route_idx': i,
                 'start_spawn': s_idx,
                 'end_spawn': e_idx,
-                'completed': False,
-                'error': str(e),
-                'max_turn_angle': route_info['max_turn_angle']
+                'max_turn_angle': route_info['max_turn_angle'],
+                'total_dist': route_info['total_dist']
             })
+            results.append(metrics)
+            
+            # [아키텍트의 수술 3: metrics.json 및 trajectory.json 즉각 저장]
+            with open(os.path.join(scenario_dir, "metrics.json"), 'w', encoding='utf-8') as f:
+                json.dump(metrics, f, indent=2, ensure_ascii=False)
+                
+            with open(os.path.join(scenario_dir, "trajectory.json"), 'w', encoding='utf-8') as f:
+                json.dump(route_info, f, indent=2, ensure_ascii=False)
+            
+            status = "✅ PASS" if metrics.get('completed', False) else "❌ FAIL"
+            print(f"\n  결과: {status}")
+            
+        except KeyboardInterrupt:
+            client.stop_recorder()
+            print("\n\n사용자에 의한 스트레스 테스트 중단.")
+            break
+        except Exception as e:
+            client.stop_recorder()
+            print(f"\n  ❌ ERROR: {e}")
+            results.append({'completed': False, 'error': str(e)})
         
-        # 시뮬레이터 안정화 (차량 파괴 후)
         time.sleep(1.0)
     
+    # 전체 요약 JSON 저장
+    with open(os.path.join(base_dir, "session_summary.json"), 'w', encoding='utf-8') as f:
+        json.dump({'total_runs': total, 'results': results}, f, indent=2)
+        
     return results
 
 
 def print_summary(results):
-    """전체 스트레스 테스트 결과 요약"""
+    """전체 스트레스 테스트 결과 및 사망 원인(Fail Category) 요약"""
     total = len(results)
     if total == 0:
         print("결과 없음")
@@ -337,57 +357,56 @@ def print_summary(results):
     
     completed = sum(1 for r in results if r.get('completed', False))
     failed = total - completed
-    collisions = sum(1 for r in results if r.get('collision', False))
     
-    avg_fallback = 0
-    max_fallback = 0
-    fallback_counts = [r.get('fallback_count', 0) for r in results if 'fallback_count' in r]
-    if fallback_counts:
-        avg_fallback = sum(fallback_counts) / len(fallback_counts)
-        max_fallback = max(fallback_counts)
+    # [아키텍트의 수술: 사망 원인 분류기]
+    fail_categories = {
+        'TIMEOUT': 0,
+        'COLLISION': 0,
+        'OFF_ROUTE': 0,
+        'SOLVER_FAIL': 0,
+        'UNKNOWN': 0
+    }
+    
+    for r in results:
+        if not r.get('completed', False):
+            err_type = r.get('error', 'UNKNOWN')
+            # 정의된 사망 원인에 속하는지 확인
+            matched = False
+            for key in fail_categories.keys():
+                if key in err_type:
+                    fail_categories[key] += 1
+                    matched = True
+                    break
+            if not matched:
+                fail_categories['UNKNOWN'] += 1
     
     print(f"\n{'='*70}")
     print(f" NMPC Stress Test 최종 결과")
     print(f"{'='*70}")
     print(f"  총 실행: {total}회")
-    print(f"  ✅ 완주: {completed}회 ({completed/total*100:.0f}%)")
-    print(f"  ❌ 실패: {failed}회 ({failed/total*100:.0f}%)")
-    print(f"  💥 충돌: {collisions}회")
-    print(f"  Fallback 평균/최대: {avg_fallback:.1f} / {max_fallback}")
+    print(f"  ✅ 완주(PASS): {completed}회 ({completed/total*100:.0f}%)")
+    print(f"  ❌ 실패(FAIL): {failed}회 ({failed/total*100:.0f}%)")
     
-    # 실패 케이스 상세
     if failed > 0:
+        print(f"\n{'─'*70}")
+        print(f" 🚨 실패 원인(Death Certificate) 분석")
+        print(f"{'─'*70}")
+        print(f"  ⏳ TIMEOUT (교착/느린 속도) : {fail_categories['TIMEOUT']}회")
+        print(f"  💥 COLLISION (물리적 충돌)  : {fail_categories['COLLISION']}회")
+        print(f"  🛣️ OFF_ROUTE (궤적 이탈)    : {fail_categories['OFF_ROUTE']}회")
+        print(f"  💀 SOLVER_FAIL (KKT 붕괴)   : {fail_categories['SOLVER_FAIL']}회")
+        if fail_categories['UNKNOWN'] > 0:
+            print(f"  ❓ UNKNOWN (기타 에러)      : {fail_categories['UNKNOWN']}회")
+            
         print(f"\n{'─'*70}")
         print(f" 실패 케이스 상세")
         print(f"{'─'*70}")
         for r in results:
             if not r.get('completed', False):
                 angle = r.get('max_turn_angle', 0)
-                err = r.get('error', r.get('max_kkt_error', 'N/A'))
+                err = r.get('error', 'UNKNOWN')
                 print(f"  S[{r['start_spawn']:>3}]→S[{r['end_spawn']:>3}] | "
                       f"angle={angle:+.1f}° | error={err}")
-    
-    # 난이도별 통계
-    print(f"\n{'─'*70}")
-    print(f" 난이도별 성공률")
-    print(f"{'─'*70}")
-    
-    buckets = {'60-70°': [], '70-80°': [], '80-90°': [], '90°+': []}
-    for r in results:
-        a = abs(r.get('max_turn_angle', 0))
-        if a >= 90:
-            buckets['90°+'].append(r)
-        elif a >= 80:
-            buckets['80-90°'].append(r)
-        elif a >= 70:
-            buckets['70-80°'].append(r)
-        else:
-            buckets['60-70°'].append(r)
-    
-    for label, items in buckets.items():
-        if items:
-            passed = sum(1 for i in items if i.get('completed', False))
-            print(f"  {label:>8}: {passed}/{len(items)} 완주 ({passed/len(items)*100:.0f}%)")
 
 
 def main():
