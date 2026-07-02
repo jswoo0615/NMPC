@@ -21,93 +21,125 @@
 namespace Optimization {
 
     namespace controller {
+        
+        /**
+         * @brief Structure to hold the result of the NMPC solver.
+         */
         #ifndef NMPC_RESULT_DEFINED
         #define NMPC_RESULT_DEFINED
         struct NMPCResult {
-            bool success = false;
-            bool fallback_triggered = false;
-            double max_kkt_error = 0.0;
-            double log10_final_merit = 0.0; 
-            int sqp_iterations = 0;
-            std::string status_msg = "OK";
+            bool success = false;                ///< True if the solver converged successfully
+            bool fallback_triggered = false;     ///< True if a fallback safe trajectory was triggered due to failure
+            double max_kkt_error = 0.0;          ///< Infinity norm of the KKT residual
+            double log10_final_merit = 0.0;      ///< Log10 of the final merit function value
+            int sqp_iterations = 0;              ///< Number of IPM/SQP iterations performed
+            std::string status_msg = "OK";       ///< Status message describing convergence or failure reason
         };
         #endif // NMPC_RESULT_DEFINED
 
+        /**
+         * @brief Configuration parameters and tuning weights for the NMPC solver.
+         */
         #ifndef NMPC_TUNING_CONFIG_DEFINED
         #define NMPC_TUNING_CONFIG_DEFINED
         struct NMPCTuningConfig {
-            double Q_D = 200.0;
-            double Q_mu = 50.0;
-            double Q_Vx = 50.0;
-            double Q_Vy = 1.0;
-            double Q_r = 1.0;
-            double Q_alpha_f = 10.0;
-            double Q_alpha_r = 10.0;
+            // State weighting terms
+            double Q_D = 200.0;         ///< Penalty for lateral deviation
+            double Q_mu = 50.0;         ///< Penalty for heading error
+            double Q_Vx = 50.0;         ///< Penalty for longitudinal velocity error
+            double Q_Vy = 1.0;          ///< Penalty for lateral velocity
+            double Q_r = 1.0;           ///< Penalty for yaw rate
+            double Q_alpha_f = 10.0;    ///< Penalty for front slip angle
+            double Q_alpha_r = 10.0;    ///< Penalty for rear slip angle
 
-            double R_Steer = 5000.0;
-            double R_Accel = 10.0;
+            // Input weighting terms
+            double R_Steer = 5000.0;    ///< Penalty for steering magnitude
+            double R_Accel = 10.0;      ///< Penalty for acceleration magnitude
 
-            double R_SteerRate = 1500.0; 
-            double R_AccelRate = 100.0;
+            // Input rate weighting terms (Slew Rate/Jerk)
+            double R_SteerRate = 1500.0; ///< Penalty for steering rate (jerk)
+            double R_AccelRate = 100.0;  ///< Penalty for acceleration rate (jerk)
 
-            double Q_kappa_track = 1500.0; 
-            double Q_ay = 10.0;            
-            double L_wb = 3.0;             
+            // Vehicle & Tracking parameters
+            double Q_kappa_track = 1500.0; ///< Penalty for deviating from feedforward steering
+            double Q_ay = 10.0;            ///< Penalty for lateral acceleration (comfort)
+            double L_wb = 3.0;             ///< Wheelbase of the vehicle
 
-            double Obstacle_Penalty = 20000.0;  
-            double Obstacle_Margin = 1.5;
+            // Obstacle & Slack penalties
+            double Obstacle_Penalty = 20000.0;  ///< Legacy penalty weight for obstacles
+            double Obstacle_Margin = 1.5;       ///< Safety margin radius added around obstacles
+            double W_slack = 100000.0;          ///< Legacy slack weight
 
-            double W_slack = 100000.0;          
+            // Hessian Regularization
+            double damping_Q = 5.0;     ///< Damping added to state Hessian (Q) for SPD properties
+            double damping_R = 500.0;   ///< Damping added to input Hessian (R) for SPD properties
 
-            double damping_Q = 5.0;
-            double damping_R = 500.0;
+            // Constraints limits
+            double d_max = 3.5;         ///< Maximum lateral boundary
+            double d_min = -3.5;        ///< Minimum lateral boundary
+            double u_min[2] = {-0.6, -10.0}; ///< Minimum input limits: {Steer, Accel}
+            double u_max[2] = {0.6, 10.0};   ///< Maximum input limits: {Steer, Accel}
 
-            double d_max = 3.5;
-            double d_min = -3.5;
-            double u_min[2] = {-0.6, -10.0};
-            double u_max[2] = {0.6, 10.0};
-
-            double kappa_ref[200] = {0.0};
+            // Reference trajectory arrays
+            double kappa_ref[200] = {0.0};   ///< Reference curvature along the horizon
             
-            double target_vx = 10.0;
-            double target_d[200] = {0.0};
+            double target_vx = 10.0;         ///< Target longitudinal velocity
+            double target_d[200] = {0.0};    ///< Reference lateral deviation along the horizon
 
-            int ipm_max_iter = 8;
-            double kkt_tolerance = 1e-2;
+            // Solver parameters
+            int ipm_max_iter = 8;          ///< Maximum number of interior-point method iterations
+            double kkt_tolerance = 1e-2;   ///< Threshold for KKT residual convergence
         };
         #endif // NMPC_TUNING_CONFIG_DEFINED
 
+        /**
+         * @brief Sparse Non-Linear Model Predictive Control solver using Primal-Dual Interior-Point Method.
+         * 
+         * @tparam H Prediction horizon length
+         * @tparam PlantModel The dynamics model used for prediction and differentiation
+         * @tparam Nx_mem Total state dimension (allocated memory)
+         * @tparam Nx_active Active state dimension used in optimization
+         * @tparam Nu Input dimension
+         */
         template <std::size_t H, typename PlantModel = Dynamics::RealTimeDynamicsModel, std::size_t Nx_mem = 8, std::size_t Nx_active = 6, std::size_t Nu = 2>
         class SparseNMPC_IPM {
             public:
+                /**
+                 * @brief Represents the state of a single constraint in the IPM.
+                 */
                 struct ConstraintState {
-                    double s = 1.0;
-                    double lam = 1.0;
-                    double ds = 0.0;
-                    double dlam = 0.0;
+                    double s = 1.0;     ///< Slack variable (must be > 0)
+                    double lam = 1.0;   ///< Dual variable (multiplier)
+                    double ds = 0.0;    ///< Newton step for slack
+                    double dlam = 0.0;  ///< Newton step for dual
                 };
-                struct IPMDuals {
-                    ConstraintState d_max;
-                    ConstraintState d_min;
-                    ConstraintState u_max[2];
-                    ConstraintState u_min[2];
-                    ConstraintState obs[10];
-                };
-
-                double dt;
-                std::array<matrix::StaticVector<double, Nu>, H> U_guess;
-                std::array<matrix::StaticVector<double, Nx_mem>, H + 1> X_pred;
-                std::array<IPMDuals, H> duals;
-                matrix::StaticVector<double, Nu> u_last;
-
-                double mu;
-
-                Evaluator::EnvironmentEvaluator<Nx_active, 10> env_evaluator;
-
-                solver::RiccatiSolver<H, Nx_active, Nu> riccati;
                 
-                SafeTrajectoryBuffer<H, Nx_mem, Nu> safe_buffer;
+                /**
+                 * @brief Groups all constraint states for a single time step.
+                 */
+                struct IPMDuals {
+                    ConstraintState d_max;      ///< Max lateral deviation constraint
+                    ConstraintState d_min;      ///< Min lateral deviation constraint
+                    ConstraintState u_max[2];   ///< Max input constraints
+                    ConstraintState u_min[2];   ///< Min input constraints
+                    ConstraintState obs[10];    ///< Obstacle avoidance constraints (up to 10)
+                };
 
+                double dt; ///< Time step for prediction [s]
+                std::array<matrix::StaticVector<double, Nu>, H> U_guess;        ///< Control trajectory guess
+                std::array<matrix::StaticVector<double, Nx_mem>, H + 1> X_pred; ///< Predicted state trajectory
+                std::array<IPMDuals, H> duals;                                  ///< Dual variables and slacks along the horizon
+                matrix::StaticVector<double, Nu> u_last;                        ///< The last applied control (used for rate constraints)
+
+                double mu; ///< Barrier parameter for Interior-Point Method
+
+                Evaluator::EnvironmentEvaluator<Nx_active, 10> env_evaluator; ///< Evaluates obstacle collisions
+                solver::RiccatiSolver<H, Nx_active, Nu> riccati;              ///< Solves the KKT linear system
+                SafeTrajectoryBuffer<H, Nx_mem, Nu> safe_buffer;              ///< Buffers safe trajectories for fallbacks
+
+                /**
+                 * @brief Constructor. Initializes trajectories and duals.
+                 */
                 SparseNMPC_IPM() : dt(0.05), mu(1.0) {
                     u_last.set_zero();
                     for (std::size_t k = 0; k < H; ++k) {
@@ -116,6 +148,10 @@ namespace Optimization {
                     }
                 }
 
+                /**
+                 * @brief Shifts the prediction sequence forward by one time step.
+                 * Smooths the transition and predicts the new terminal state via RK4.
+                 */
                 inline void shift_sequence() {
                     for (std::size_t k = 0; k < H - 1; ++k) {
                         U_guess[k] = U_guess[k + 1];
@@ -131,6 +167,9 @@ namespace Optimization {
                     X_pred[H] = integrator::step_rk4<Nx_mem, Nu, PlantModel, double>(model, X_pred[H - 1], U_guess[H - 1], dt);
                 }
 
+                /**
+                 * @brief Safely falls back to a previous valid trajectory if the IPM fails.
+                 */
                 inline NMPCResult execute_fallback(NMPCResult& res, const std::string& reason, const NMPCTuningConfig& config) {
                     res.success = false;
                     res.fallback_triggered = true;
@@ -153,6 +192,10 @@ namespace Optimization {
                     return res;
                 }
 
+                /**
+                 * @brief Evaluates the Merit function used for the backtracking line search.
+                 * Computes tracking costs, barrier penalties, and state consistency (L1 Penalty).
+                 */
                 double evaluate_merit(double alpha, const NMPCTuningConfig& config,
                                       const matrix::StaticVector<double, Nx_mem>& x_init, double current_mu) {
                     
@@ -211,6 +254,7 @@ namespace Optimization {
                         double a_y = x_curr(3) * x_curr(5);
                         merit += 0.5 * (config.Q_ay * a_y * a_y);
 
+                        // Evaluates the log-barrier and the Exact L1 penalty
                         auto eval_barrier = [&](double c, double s, double ds) {
                             double s_cand = s + alpha * ds;
                             if (s_cand <= 1e-8) {
@@ -248,22 +292,28 @@ namespace Optimization {
                     return merit;
                 }
 
+                /**
+                 * @brief Main entry point to solve the Sparse NMPC problem using Primal-Dual IPM.
+                 */
                 NMPCResult solve_ipm(const matrix::StaticVector<double, Nx_mem>& x_curr, const NMPCTuningConfig& config) {
                     NMPCResult result;
                     result.sqp_iterations = 0;
 
+                    // 1. NaN checks
                     if (std::isnan(x_curr(1)) || std::isnan(x_curr(3))) {
                         return execute_fallback(result, "Primal State NaN Detected", config);
                     }
                     
                     env_evaluator.obstacle_margin = config.Obstacle_Margin;
 
+                    // 2. Initialize prediction states
                     X_pred[0] = x_curr;
                     X_pred[0](3) = MathTraits<double>::max(0.1, x_curr(3));
 
-                    mu = 1.0;
+                    mu = 1.0; // Reset barrier parameter
 
                     PlantModel model_forward;
+                    // Forward pass to initialize slacks and dual variables
                     for (std::size_t k = 0; k < H; ++k) {
                         model_forward.kappa = config.kappa_ref[k]; 
                         
@@ -291,9 +341,11 @@ namespace Optimization {
                         }
                     }
 
+                    // 3. Main IPM/SQP Loop
                     for (int ipm_step = 0; ipm_step < config.ipm_max_iter; ++ipm_step) {
                         result.sqp_iterations++;
 
+                        // Update Jacobian only every other iteration via Automatic Differentiation (AD)
                         bool update_jacobian = (ipm_step % 2 == 0);
 
                         if (update_jacobian) {
@@ -305,6 +357,7 @@ namespace Optimization {
                                 matrix::StaticVector<ADVar, Nx_mem> x_dual;
                                 matrix::StaticVector<ADVar, Nu> u_dual;
 
+                                // Inject Dual variables for AD gradient tracking
                                 for (std::size_t i = 0; i < Nx_active; ++i) {
                                     x_dual(i) = ADVar::make_variable(X_pred[k](i), i);
                                 }
@@ -319,6 +372,7 @@ namespace Optimization {
                                 matrix::StaticVector<ADVar, Nx_mem> x_next_dual = 
                                     integrator::step_rk4<Nx_mem, Nu, PlantModel, ADVar>(model_ad, x_dual, u_dual, dt);
 
+                                // Extract Jacobian A and B matrices from Dual variable gradients
                                 for (std::size_t j = 0; j < Nx_active; ++j) {
                                     for (std::size_t i = 0; i < Nx_active; ++i) {
                                         riccati.A[k](i, j) = x_next_dual(i).g[j];
@@ -339,6 +393,7 @@ namespace Optimization {
                         double gap_sum = 0.0;
                         int num_constraints = 0;
 
+                        // Build Q, R, q, r matrices for Riccati solver
                         for (std::size_t k = 0; k < H; ++k) {
                             riccati.Q[k].set_zero();
                             riccati.R[k].set_zero();
@@ -350,6 +405,7 @@ namespace Optimization {
                             double err_mu = X_pred[k](2);
                             double err_v = X_pred[k](3) - config.target_vx;
 
+                            // Stage costs
                             riccati.Q[k](1, 1) = config.Q_D;
                             riccati.q[k](1) = config.Q_D * err_d;
                             riccati.Q[k](2, 2) = config.Q_mu;
@@ -405,6 +461,7 @@ namespace Optimization {
                             riccati.Q[k](3, 5) += config.Q_ay * v_x * r_rate;
                             riccati.Q[k](5, 3) += config.Q_ay * v_x * r_rate;
 
+                            // Applies the condensed log-barrier constraints into the KKT system
                             auto apply_condensed = [&](double c, double J_x0, double J_x1, double J_u0, double J_u1, ConstraintState& cs) {
                                 double J_term = (mu + cs.lam * c) / cs.s;
                                 double H_term = cs.lam / cs.s;
@@ -456,6 +513,7 @@ namespace Optimization {
                                 );
                             }
 
+                            // Hessian Regularization to ensure SPD property
                             for (std::size_t i = 0; i < Nx_active; ++i) {
                                 riccati.Q[k](i, i) += config.damping_Q;
                             }
@@ -464,6 +522,7 @@ namespace Optimization {
                             }
                         }
 
+                        // Terminal Cost Configuration
                         riccati.Q[H].set_zero();
                         riccati.q[H].set_zero();
                         riccati.Q[H](1, 1) = config.Q_D * 5.0;
@@ -473,6 +532,7 @@ namespace Optimization {
                         riccati.Q[H](3, 3) = config.Q_Vx * 5.0;
                         riccati.q[H](3) = config.Q_Vx * 5.0 * (X_pred[H](3) - config.target_vx);
 
+                        // 4. Solve the KKT System
                         if (riccati.solve() != SolverStatus::SUCCESS) {
                             return execute_fallback(result, "Riccati Factorization Failed", config);
                         }
@@ -482,6 +542,7 @@ namespace Optimization {
 
                         matrix::StaticVector<double, H * Nu> du_vec;
 
+                        // 5. Extract Dual Steps and Compute max line search step (alpha_max)
                         for (std::size_t k = 0; k < H; ++k) {
                             auto extract_dual = [&](double c, double J_x0, double J_x1, double J_u0, double J_u1, ConstraintState& cs) {
                                 double dz = J_x0 * riccati.dx[k](0) + J_x1 * riccati.dx[k](1) + J_u0 * riccati.du[k](0) + J_u1 * riccati.du[k](1);
@@ -526,6 +587,7 @@ namespace Optimization {
                             }
                         }
 
+                        // 6. Backtracking Line Search using Merit Function
                         double current_merit = evaluate_merit(0.0, config, x_curr, mu);
                         
                         if (std::isnan(current_merit) || std::isinf(current_merit)) {
@@ -545,6 +607,7 @@ namespace Optimization {
                                 continue;
                             }
 
+                            // Armijo Condition
                             double armijo_threshold = current_merit + 1e-4 * std::max(1.0, std::abs(current_merit));
                             if (trial_merit <= armijo_threshold) {
                                 break;
@@ -552,6 +615,7 @@ namespace Optimization {
                             optimal_alpha *= 0.5;
                         }
 
+                        // 7. Update Primal and Dual trajectories
                         for (std::size_t k = 0; k < H; ++k) {
                             for (std::size_t i = 0; i < Nx_active; ++i) {
                                 X_pred[k](i) += optimal_alpha * riccati.dx[k](i);
@@ -579,6 +643,7 @@ namespace Optimization {
                             X_pred[H](i) += optimal_alpha * riccati.dx[H](i);
                         }
 
+                        // 8. Convergence Check
                         double kkt_residual = Solver::KKTMonitor<H * Nu, 1>::fast_infinity_norm(du_vec);
                         result.max_kkt_error = kkt_residual;
                         result.log10_final_merit = std::log10(std::max(1e-9, current_merit));
@@ -589,6 +654,7 @@ namespace Optimization {
                         double average_gap = gap_sum / num_constraints;
                         mu = MathTraits<double>::max(1e-4, 0.2 * average_gap);
 
+                        // Early exit if converged
                         if (kkt_residual < config.kkt_tolerance && average_gap <= 1e-3) {
                             result.status_msg = "IPM Converged (Fast Exit)";
                             safe_buffer.commit(X_pred, U_guess);
@@ -596,6 +662,7 @@ namespace Optimization {
                         }
                     }
 
+                    // 9. Finalize
                     u_last = U_guess[0];
                     result.success = true;
                     if (result.status_msg == "OK") {

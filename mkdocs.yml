@@ -1,0 +1,82 @@
+site_name: NMPC Documentation
+site_description: High-performance NMPC Controller
+site_author: Junsang Woo
+
+theme:
+  name: material
+
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.instant
+    - navigation.tracking
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+
+  - admonition
+  - attr_list
+  - md_in_html
+
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+
+  - pymdownx.arithmatex:
+      generic: true
+  
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+extra_javascript:
+
+  - javascripts/mathjax.js
+
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+  - https://unpkg.com/mermaid@11/dist/mermaid.min.js
+  - javascripts/mermaid.js
+
+nav:
+
+  - Home: index.md
+
+  - Control:
+
+      - Sparse NMPC:
+          - Overview: Control/SparseNMPC_IPM.md
+          - API Reference: Control/SparseNMPC_IPM_API.md
+
+      - Interior Point Method:
+          - Primal-Dual IPM: Control/IPM/Primal_Dual_IPM.md
+
+      - Fail-Safe System:
+          - Safe Buffer: Control/SafeBuffer.md
+
+  - Technical Notes:
+      - Slack Variables: Control/IPM/Slack_Variables_in_SparseNMPC_IPM.md
+      - Merit Function: Control/IPM/evaluate_merit.md
+      - Exact L1 Penalty: Control/IPM/Exact_L1_Penalty_and_Log_Barrier.md
+      - Spline Derivation: Evaluator/StaticCubicSpline/StaticCubicSpline_Equations.md
+
+  - Solver:
+
+      - Riccati Solver: Solver/RiccatiSolver.md
+
+  - Evaluator:
+
+      - Static Cubic Spline: Evaluator/StaticCubicSpline/StaticCubicSpline.md
