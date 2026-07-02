@@ -55,6 +55,12 @@ nav:
 
   - Home: index.md
 
+  - Dynamics:
+      - Overview: Dynamics/Overview.md
+      - API Reference: Dynamics/API_Reference.md
+      - Technical Notes:
+          - Vehicle Equations: Dynamics/Technical_Notes/Vehicle_Equations.md
+
   - Control:
 
       - Sparse NMPC:
@@ -67,11 +73,10 @@ nav:
       - Fail-Safe System:
           - Safe Buffer: Control/SafeBuffer.md
 
-  - Technical Notes:
-      - Slack Variables: Control/IPM/Slack_Variables_in_SparseNMPC_IPM.md
-      - Merit Function: Control/IPM/evaluate_merit.md
-      - Exact L1 Penalty: Control/IPM/Exact_L1_Penalty_and_Log_Barrier.md
-      - Spline Derivation: Evaluator/StaticCubicSpline/StaticCubicSpline_Equations.md
+      - Technical Notes:
+          - Slack Variables: Control/IPM/Slack_Variables_in_SparseNMPC_IPM.md
+          - Merit Function: Control/IPM/evaluate_merit.md
+          - Exact L1 Penalty: Control/IPM/Exact_L1_Penalty_and_Log_Barrier.md
 
   - Solver:
 
@@ -80,3 +85,5 @@ nav:
   - Evaluator:
 
       - Static Cubic Spline: Evaluator/StaticCubicSpline/StaticCubicSpline.md
+      - Technical Notes:
+          - Spline Derivation: Evaluator/StaticCubicSpline/StaticCubicSpline_Equations.md

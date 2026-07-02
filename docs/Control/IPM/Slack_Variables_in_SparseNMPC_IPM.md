@@ -34,7 +34,7 @@ In the "brain" of the solver, the physical state $x$ (vehicle position, etc.) an
 - :material-calculator:
     **1. Newton Step (Direction Calculation)**
     
-    The solver simultaneously calculates how much to change $x$ ($\Delta x$) and how much to change $s$ ($\Delta s$) by solving a system of equations ([RiccatiSolver](../Solver/RiccatiSolver.md)).
+    The solver simultaneously calculates how much to change $x$ ($\Delta x$) and how much to change $s$ ($\Delta s$) by solving a system of equations ([RiccatiSolver](../../Solver/RiccatiSolver.md)).
 
 - :material-arrow-decision:
     **2. Line Search (Applying Step Size $\alpha$)**

@@ -32,7 +32,11 @@ CUDA_CALLABLE inline T safe_min(T val, double max_val) {
     return (v <= max_val) ? val : static_cast<T>(max_val);
 }
 
-// Quasi-Static Load Transfer (For Real-Time Model)
+/**
+ * @brief Computes Quasi-Static Load Transfer (Used for Real-Time Model)
+ * @details Calculates the vertical load (fz) on all 4 wheels based on longitudinal 
+ *          acceleration and a steady-state approximation of lateral acceleration.
+ */
 template <typename T>
 CUDA_CALLABLE inline FourWheelLoads<T> computeQuasiStaticLoadTransfer(
     const VehicleDynamicsParams<T>& params,
@@ -60,7 +64,11 @@ CUDA_CALLABLE inline FourWheelLoads<T> computeQuasiStaticLoadTransfer(
     return loads;
 }
 
-// Suspension Geometric Load Transfer (For High-Fidelity Model)
+/**
+ * @brief Computes Suspension Geometric Load Transfer (Used for High-Fidelity Model)
+ * @details Calculates the vertical load (fz) considering suspension roll/pitch stiffness, 
+ *          roll center heights, and updates the chassis attitude.
+ */
 template <typename T>
 CUDA_CALLABLE inline FourWheelLoads<T> computeSuspensionLoadTransfer(
     const VehicleDynamicsParams<T>& veh_params,
@@ -104,7 +112,9 @@ CUDA_CALLABLE inline FourWheelLoads<T> computeSuspensionLoadTransfer(
 // 3. Tire Magic Formula Physics
 // =========================================================================
 
-// 단일 타이어의 비선형 횡력 계산 (Magic Formula)
+/**
+ * @brief Computes the non-linear lateral force for a single tire using the Magic Formula
+ */
 template <typename T>
 CUDA_CALLABLE inline T computeMagicFormulaTireForce(
     const TireLoadParams<T>& tire_params,
@@ -123,7 +133,9 @@ CUDA_CALLABLE inline T computeMagicFormulaTireForce(
     return D * FastMath::fast_sin(tire_params.C_shape * FastMath::fast_atan(B * alpha));
 }
 
-// 4륜 기반 통합 횡력 계산
+/**
+ * @brief Integrates lateral forces across all 4 wheels into a bicycle model equivalent
+ */
 template <typename T>
 CUDA_CALLABLE inline BicycleLateralForces<T> computeBicycleLateralForces(
     const TireLoadParams<T>& tire_params,
@@ -143,7 +155,9 @@ CUDA_CALLABLE inline BicycleLateralForces<T> computeBicycleLateralForces(
     return forces;
 }
 
-// 캠버 추력을 포함한 타이어 횡력 계산 (High-Fidelity)
+/**
+ * @brief Computes lateral forces including Camber Thrust (Used for High-Fidelity Model)
+ */
 template <typename T>
 CUDA_CALLABLE inline BicycleLateralForces<T> computeLateralForcesWithCamber(
     const TireLoadParams<T>& tire_params,

@@ -12,27 +12,36 @@ namespace Optimization {
 namespace Dynamics {
 
 /**
- * @brief 정밀 시뮬레이션 및 검증용 8차원 Frenet 자전거 모델 (기능 2: 세부 정밀용)
- * @details 4륜 독립 하중 이동, 서스펜션 롤/피치 지오메트리, 동적 캠버 변화에 따른 추력(Camber Thrust) 등을 
- *          고려한 높은 정확도의 동역학을 제공하며, 연속 상태공간 Jacobian 추출 기능을 포함합니다.
+ * @brief High-Fidelity 8-DoF Frenet Bicycle Model for Simulation and Validation
+ * @details Provides highly accurate vehicle dynamics by incorporating independent 4-wheel 
+ *          load transfer, suspension roll/pitch geometry, and dynamic camber thrust.
+ *          Includes continuous state-space Jacobian extraction via Automatic Differentiation.
  */
 class HighFidelityDynamicsModel {
 public:
-    VehicleDynamicsParams<double> veh_params_base;
-    SuspensionParams<double> susp_params_base;
-    TireLoadParams<double> tire_params_base;
-    double kappa = 0.0;
+    VehicleDynamicsParams<double> veh_params_base;  ///< Base physical parameters
+    SuspensionParams<double> susp_params_base;      ///< Base suspension geometry parameters
+    TireLoadParams<double> tire_params_base;        ///< Base tire parameters
+    double kappa = 0.0;                             ///< Road curvature at the current prediction step
 
     CUDA_CALLABLE HighFidelityDynamicsModel() {
-        // 기본 파라미터 초기화
+        // Initialize default vehicle parameters
         veh_params_base = {1500.0, 9.81, 1.2, 1.6, 0.5, 1.6, 1.6, 0.6, 100.0, 3000.0};
         susp_params_base = {50000.0, 80000.0, 48000.0, 0.3, 0.35, 0.05, 20000.0, -0.01, -0.01};
         tire_params_base = {1.0, 0.0001, 4000.0, 4000.0, 15.0, 1.4, 0.1, 0.15, 0.15};
     }
 
+    /**
+     * @brief Computes the state derivative x_dot = f(x, u).
+     * 
+     * @tparam T Scalar type (supports double or Dual for Automatic Differentiation)
+     * @param x Current state vector (s, d, mu, vx, vy, r, alpha_f, alpha_r)
+     * @param u Control input vector (delta, a_cmd)
+     * @return State derivative x_dot
+     */
     template <typename T>
     CUDA_CALLABLE matrix::StaticVector<T, 8> operator()(const matrix::StaticVector<T, 8>& x, const matrix::StaticVector<T, 2>& u) const {
-        // 상태 언패킹
+        // State unpacking
         T s = x(0);
         T d = x(1);
         T mu = x(2);
@@ -42,11 +51,11 @@ public:
         T alpha_f_curr = x(6);
         T alpha_r_curr = x(7);
 
-        // 제어 입력 언패킹
+        // Control input unpacking
         T delta = u(0);
         T a_cmd = u(1);
 
-        // 파라미터 캐스팅 (double -> T)
+        // Parameter casting (double -> T)
         VehicleDynamicsParams<T> v_p;
         v_p.m = T(veh_params_base.m);
         v_p.g = T(veh_params_base.g);
@@ -81,11 +90,11 @@ public:
         t_p.sigma_f = T(tire_params_base.sigma_f);
         t_p.sigma_r = T(tire_params_base.sigma_r);
 
-        // 수치 안정성을 위해 vx 클리핑
+        // Clip vx for numerical stability at low speeds
         double vx_val = Optimization::MathTraits<T>::get_value(vx);
         T vx_safe = (vx_val >= 0.1) ? vx : ((vx_val <= -0.1) ? vx : T(0.1));
 
-        // 1. 정상 상태 슬립각 및 지연길이 (Relaxation Length) ODE
+        // 1. Steady-State Slip Angle and Relaxation Length ODE
         T alpha_ss_f = delta - FastMath::math_atan2(vy + v_p.l_f * r, vx_safe);
         T alpha_ss_r = -FastMath::math_atan2(vy - v_p.l_r * r, vx_safe);
 
@@ -100,19 +109,19 @@ public:
         T d_alpha_f = rate_f * (alpha_ss_f - alpha_f_curr);
         T d_alpha_r = rate_r * (alpha_ss_r - alpha_r_curr);
 
-        // 2. High-Fidelity 하중 이동 및 캠버 계산 (Suspension Geometrics)
+        // 2. High-Fidelity Load Transfer and Camber calculation (Suspension Geometrics)
         ChassisAttitude<T> attitude;
         FourWheelLoads<T> loads = computeSuspensionLoadTransfer(v_p, s_p, vx_safe, r, a_cmd, attitude);
 
-        // 3. 캠버 추력을 포함한 비선형 타이어 횡력 계산
+        // 3. Non-Linear Tire Lateral Forces including Camber Thrust
         BicycleLateralForces<T> forces = computeLateralForcesWithCamber(t_p, s_p, loads, attitude, alpha_f_curr, alpha_r_curr);
 
-        // 환경 저항 (Aerodynamic Drag)
+        // Aerodynamic Drag Force
         T C_drag = static_cast<T>(0.3);
         T F_drag = C_drag * vx * Optimization::MathTraits<T>::abs(vx);
         T effective_a = a_cmd - (F_drag / v_p.m);
 
-        // 4. Frenet Kinematics
+        // 4. Frenet Kinematics and Accelerations
         T denom = T(1.0) - d * T(kappa);
         double denom_val = Optimization::MathTraits<T>::get_value(denom);
         T denom_safe = (denom_val >= 0.05) ? denom : T(0.05);
@@ -132,12 +141,19 @@ public:
         return x_dot;
     }
 
-    // Matrix Engine: 8-State Jacobian (A, B) 추출
+    /**
+     * @brief Matrix Engine: Extracts continuous 8-state Jacobians (A, B) using AD.
+     * 
+     * @param x0 Point of linearization (state)
+     * @param u0 Point of linearization (control)
+     * @param A Output Jacobian matrix df/dx
+     * @param B Output Jacobian matrix df/du
+     */
     CUDA_CALLABLE inline void extractJacobians(const matrix::StaticVector<double, 8>& x0, 
                                                const matrix::StaticVector<double, 2>& u0,
                                                std::array<std::array<double, 8>, 8>& A,
                                                std::array<std::array<double, 2>, 8>& B) const {
-        // A 행렬 추출 (상태 변수에 대해 미분)
+        // Extract A matrix (derivative w.r.t state)
         for (int i = 0; i < 8; ++i) {
             matrix::StaticVector<Dual<double>, 8> x_dual;
             for (int k = 0; k < 8; ++k) x_dual(k) = Dual<double>(x0(k), (i == k) ? 1.0 : 0.0);
@@ -151,7 +167,7 @@ public:
             for (int k = 0; k < 8; ++k) A[k][i] = x_dot_dual(k).d;
         }
 
-        // B 행렬 추출 (제어 입력에 대해 미분)
+        // Extract B matrix (derivative w.r.t control input)
         for (int j = 0; j < 2; ++j) {
             matrix::StaticVector<Dual<double>, 8> x_dual;
             for (int k = 0; k < 8; ++k) x_dual(k) = Dual<double>(x0(k), 0.0);

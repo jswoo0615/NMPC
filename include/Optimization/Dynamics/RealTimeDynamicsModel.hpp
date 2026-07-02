@@ -8,27 +8,35 @@ namespace Optimization {
 namespace Dynamics {
 
 /**
- * @brief 실시간 NMPC 솔버 연동을 위한 8차원 Frenet 자전거 모델 (기능 1: 실시간용)
- * @details 연산 속도 극대화를 위해 서스펜션 기하학(롤/피치)을 제외하고, 
- *          종방향 하중 이동 및 기본 Magic Formula 연산만을 포함합니다.
+ * @brief 8-DoF Frenet Bicycle Model for Real-Time NMPC Solvers
+ * @details Optimized for maximum computational speed. It excludes suspension geometry (roll/pitch)
+ *          but includes longitudinal load transfer and a base Magic Formula tire model.
  */
 class RealTimeDynamicsModel {
 public:
-    VehicleDynamicsParams<double> veh_params_base;
-    TireLoadParams<double> tire_params_base;
-    double kappa = 0.0;
+    VehicleDynamicsParams<double> veh_params_base;  ///< Base physical parameters
+    TireLoadParams<double> tire_params_base;        ///< Base tire parameters
+    double kappa = 0.0;                             ///< Road curvature at the current prediction step
 
-    CUDA_CALLABLE RealTimeDynamicsModel() { // (HighFidelity도 동일하게 수정)
-        // 기본 파라미터 초기화
+    CUDA_CALLABLE RealTimeDynamicsModel() {
+        // Initialize default vehicle parameters
         veh_params_base = {1500.0, 9.81, 1.2, 1.6, 0.5, 1.6, 1.6, 0.6, 100.0, 3000.0};
         
-        // [Architect's Correction] c1=15.0, c2=0.0002 로 정상 타이어 코너링 강성 복구
+        // [Architect's Correction] c1=15.0, c2=0.0002 restored for normal cornering stiffness
         tire_params_base = {1.0, 0.0001, 4000.0, 15.0, 0.0002, 1.4, 0.1, 0.15, 0.15};
     }
 
+    /**
+     * @brief Computes the state derivative x_dot = f(x, u).
+     * 
+     * @tparam T Scalar type (supports double or Dual for Automatic Differentiation)
+     * @param x Current state vector (s, d, mu, vx, vy, r, alpha_f, alpha_r)
+     * @param u Control input vector (delta, a)
+     * @return State derivative x_dot
+     */
     template <typename T>
     CUDA_CALLABLE matrix::StaticVector<T, 8> operator()(const matrix::StaticVector<T, 8>& x, const matrix::StaticVector<T, 2>& u) const {
-        // 상태 언패킹
+        // State unpacking
         T s = x(0);
         T d = x(1);
         T mu = x(2);
@@ -38,11 +46,11 @@ public:
         T alpha_f_curr = x(6);
         T alpha_r_curr = x(7);
 
-        // 제어 입력 언패킹
+        // Control input unpacking
         T delta = u(0);
         T a = u(1);
 
-        // 파라미터 캐스팅
+        // Parameter casting
         VehicleDynamicsParams<T> v_p;
         v_p.m = T(veh_params_base.m);
         v_p.g = T(veh_params_base.g);
@@ -66,18 +74,18 @@ public:
         t_p.sigma_f = T(tire_params_base.sigma_f);
         t_p.sigma_r = T(tire_params_base.sigma_r);
 
-        // 수치 안정성을 위해 vx 클리핑
+        // Clip vx for numerical stability at low speeds
         double vx_val = Optimization::MathTraits<T>::get_value(vx);
         T vx_safe = (vx_val >= 0.1) ? vx : ((vx_val <= -0.1) ? vx : T(0.1));
 
-        // 1. 하중 이동 (Quasi-Static)
+        // 1. Quasi-Static Load Transfer
         FourWheelLoads<T> loads = computeQuasiStaticLoadTransfer(v_p, vx_safe, r, a);
 
-        // 2. 정상 상태 슬립각 (Steady-State Slip Angle)
+        // 2. Steady-State Slip Angle calculation
         T alpha_ss_f = delta - FastMath::math_atan2(vy + v_p.l_f * r, vx_safe);
         T alpha_ss_r = -FastMath::math_atan2(vy - v_p.l_r * r, vx_safe);
 
-        // 3. 지연길이 (Relaxation Length) ODE
+        // 3. Relaxation Length ODE
         T vx_abs = (vx_val >= 0.0) ? vx : -vx;
         T vx_relax = safe_max(vx_abs, 0.5); 
 
@@ -89,10 +97,10 @@ public:
         T d_alpha_f = rate_f * (alpha_ss_f - alpha_f_curr);
         T d_alpha_r = rate_r * (alpha_ss_r - alpha_r_curr);
 
-        // 4. Magic Formula 비선형 횡력 계산
+        // 4. Magic Formula Non-Linear Lateral Forces
         BicycleLateralForces<T> forces = computeBicycleLateralForces(t_p, loads, alpha_f_curr, alpha_r_curr);
 
-        // 5. Frenet Kinematics 및 가속도
+        // 5. Frenet Kinematics and Accelerations
         T denom = T(1.0) - d * T(kappa);
         double denom_val = Optimization::MathTraits<T>::get_value(denom);
         T denom_safe = (denom_val >= 0.05) ? denom : T(0.05);
