@@ -13,6 +13,11 @@ namespace FastMath {
 constexpr size_t LUT_SIZE = 1024;
 constexpr double PI = 3.14159265358979323846;
 
+/**
+ * @brief Fast trigonometric functions using Lookup Tables (LUT).
+ * @details Specifically optimized for CUDA environments to avoid expensive 
+ *          hardware-level trigonometric function calls during model prediction.
+ */
 class FastTrig {
 private:
     double sin_lut[LUT_SIZE];

@@ -3,19 +3,25 @@
 
 namespace Optimization {
     namespace Dynamics {
+        // =========================================================================
         // 1. Parameters & Data Structures
+        // =========================================================================
+        
+        /**
+         * @brief Standard vehicle dynamics parameters
+         */
         template <typename T>
         struct VehicleDynamicsParams {
-            T m;
-            T g;
-            T l_f;
-            T l_r;
-            T h_cg;
-            T t_f;
-            T t_r;
-            T K_df;
-            T fz_min;
-            T I_z;
+            T m;        ///< Mass [kg]
+            T g;        ///< Gravity [m/s^2]
+            T l_f;      ///< Distance from CG to front axle [m]
+            T l_r;      ///< Distance from CG to rear axle [m]
+            T h_cg;     ///< Height of Center of Gravity [m]
+            T t_f;      ///< Front track width [m]
+            T t_r;      ///< Rear track width [m]
+            T K_df;     ///< Front roll stiffness distribution ratio
+            T fz_min;   ///< Minimum normal load for numerical stability [N]
+            T I_z;      ///< Yaw moment of inertia [kg*m^2]
         };
 
         template <typename T>

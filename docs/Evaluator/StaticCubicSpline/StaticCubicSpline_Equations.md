@@ -1,106 +1,138 @@
-## Static Cubic Spline 수학적 모델링 및 유도 
-### 1. 1D Cubic Spline 기본 정의
-각 구간 $[x_{i}, x_{i+1}]$ 에서 스플라인 함수는 구간의 시작점 $x_{i}$를 지역 좌표계 (Local Coordinate)의 원점으로 삼는 3차 다항식으로, 이산적으로 정의됩니다
+# Mathematical Note: Static Cubic Spline Derivation
 
-$$S_{i}(x) = a_{i} + b_{i}(x - x_{i}) + c_{i}(x - x_{i})^{2} + d_{i}(x - x_{i})^{3}$$
+!!! info "Background"
+    This document outlines the mathematical modeling, derivative expansion, and tridiagonal matrix formulation for the `StaticCubicSpline` interpolator.
+    It serves as a technical reference to understand the exact numerical derivation used in the codebase.
 
-여기서 각 계수 $a_{i}, b_{i}, c_{i}, d_{i}$는 다음의 연속성 및 경계 조건을 만족하도록 산출됩니다.
-- **초기 조건** : $a_{i} = y_{i}$ (각 구간 시작점의 함수값)
-- **구간 간격** : $h_{i} = x_{i+1} - x_{i}$
-- **Natural Spline 경계 조건** : 양 끝점에서의 곡률 (2차 도함수)은 0으로 가정합니다
-$$S_{0}^{\prime \prime}(x_{0}) = 0, \quad S_{n-1}^{\prime \prime}(x_{n}) = 0$$
+## :material-numeric-1-box: 1. 1D Cubic Spline Basic Definition
 
-#### 1.1. 도함수 전개
-다항식을 미분하여 1차 및 2차 도함수를 도출합니다
-- **1차 도함수** : $S_{i}^{\prime \prime}(x) = b_{i} + 2c_{i}(x - x_{i}) + 3d_{i}(x - x_{i})^{2}$
-- **2차 도함수** : $S_{i}^{\prime \prime}(x) = 2c_{i} + 6d_{i}(x - x_{i})$
+In each interval $[x_{i}, x_{i+1}]$, the spline function is discretely defined as a cubic polynomial, taking the start point $x_{i}$ as the origin of the local coordinate system:
 
-### 2. 2D Cubic Spline으로 확장
-차량 동역학 제어 등 2차원 공간에서는 누적 호 길이 (Arc Length)인 매개변수 $s$를 기준으로 $X$와 $Y$ 좌표를 각각 독립적인 1D 스플라인으로 보간합니다.
-- **위치 보간** : $X(s) = S_{x}(s), \quad Y(s) = S_{y}(s)$
-- **헤딩 (Yaw) 도출** : $\theta (s) = \text{arctan2}(\frac{dY}{ds}, \frac{dX}{ds})$
-- **곡률 (Curvature) 도출** : 
-$$\kappa(s) = \frac{\frac{d^{2}Y}{ds^{2}}\frac{dX}{ds} - \frac{d^{2}X}{ds}\frac{dY}{ds}}{((\frac{dX}{ds})^{2} + (\frac{dY}{ds})^{2})^{3/2}}$$
+!!! math "Polynomial Definition"
+    $$S_{i}(x) = a_{i} + b_{i}(x - x_{i}) + c_{i}(x - x_{i})^{2} + d_{i}(x - x_{i})^{3}$$
 
-### 3. 핵심 계수 도출 및 삼중 대각 행렬 유도 (Derivation)
-스플라인 보간법의 핵심은 **모든 구간의 경계점 $x_{i+1}$에서 매끄럽게 연결되어야 한다**는 제약 조건을 통해 $c_{i}$를 구하는 연립방정식을 세우는 것입니다.
+The coefficients $a_{i}, b_{i}, c_{i}, d_{i}$ are calculated to satisfy the following continuity and boundary conditions:
 
-#### 3.1. 연속성 조건의 이산적 해석
-구간 $i$의 오른쪽 끝점과 구간 $i+1$의 왼쪽 끝점은 전역 좌표계에서 동일한 노드 $x_{i+1}$입니다
-- **구간 $i$의 우측 끝점** : 지역 좌표로 $(x - x_{i}) = h_{i}$
-- **구간 $i+1$의 좌측 끝점** : 자신의 시작점이므로 지역 좌표로 $(x - x_{i+1}) = 0$
+- **Initial Condition**: $a_{i} = y_{i}$ (The function value at the start of each interval)
+- **Interval Spacing**: $h_{i} = x_{i+1} - x_{i}$
+- **Natural Spline Boundary Condition**: The curvature (second derivative) at both endpoints is assumed to be zero:
+  $$S_{0}^{\prime \prime}(x_{0}) = 0, \quad S_{n-1}^{\prime \prime}(x_{n}) = 0$$
 
-따라서 연속성 조건은 "동일한 전역 노드 $x_{i+1}$ 에서, 왼쪽 곡선 $S_{i}$의 끝점과 오른쪽 곡선 $S_{i+1}$의 시작점의 상태가 일치해야 한다"로 귀결됩니다.
+### 1.1. Derivative Expansion
 
-#### 3.2. 도함수 연속 조건을 통한 연립방정식 전개
-##### Step 1. 2차 도함수 연속 조건
-- $S_{i}^{\prime \prime}(x_{i+1}) = 2c_{i} + 6d_{i}h_{i}$
-- $S_{i+1}^{\prime \prime}(x_{i+1}) = 2c_{i+1} + 6d_{i+1}(0) = 2c_{i+1}$
-- 조건 성립 : $2c_{i} + 6d_{i}h_{i} = 2c_{i+1} \rightarrow d_{i} = \frac{c_{i+1} - c_{i}}{3h_{i}}$
+By differentiating the polynomial, the first and second derivatives are derived:
 
-##### Step 2. 함수값 연속 조건
-- $S_{i}(x_{i+1}) = a_{i} + b_{i}h_{i} + c_{i}h_{i}^{2} + d_{i}h_{i}^{3} = a_{i+1}$
-- $b_{i}$에 대해 정리 (Step 1의 $d_{i}$ 대입)
-$$b_{i} = \frac{a_{i+1} - a_{i}}{h_{i}} - \frac{h_{i}}{3}(c_{i+1} + 2c_{i})$$
+- **First Derivative**: $S_{i}^{\prime}(x) = b_{i} + 2c_{i}(x - x_{i}) + 3d_{i}(x - x_{i})^{2}$
+- **Second Derivative**: $S_{i}^{\prime \prime}(x) = 2c_{i} + 6d_{i}(x - x_{i})$
 
-##### Step 3. 1차 도함수 연속 조건 및 $\alpha$ 도출
-- $S_{i}^{\prime \prime}(x_{i+1}) = b_{i} + 2c_{i}h_{i} + 3d_{i}h_{i}^{2} = b_{i+1}$
-- 위 식에 Step 1, 2에서 구한 $b_{i}, b_{i+1}, d_{i}$를 모두 대입하고 $c$에 대해 내림차순 정렬하면 다음의 핵심 관계식이 유도됩니다
+## :material-numeric-2-box: 2. Extension to 2D Cubic Spline
 
-$$h_{i-1}c_{i-1} + 2(h_{i-1} + h_{i})c_{i} + h_{i}c_{i+1} = \frac{3}{h_{i}}(a_{i+1} - a_{i}) - \frac{3}{h_{i-1}}(a_{i} - a_{i-1})$$
+In a 2D space, such as vehicle dynamics control, the $X$ and $Y$ coordinates are interpolated as independent 1D splines based on the accumulated arc length parameter $s$.
 
+<div class="grid cards" markdown>
 
-#### 3.3. 보조항 $\alpha$의 정의와 의미
-방정식의 우변을 $\alpha_{i}$로 정의합니다
-$$\alpha_{i} = \frac{3}{h_{i}}(a_{i+1} - a_{i}) - \frac{3}{h_{i-1}}(a_{i} - a_{i-1})$$
-- **물리적 의미**
-$\frac{a_{i+1} - a_{i}}{h_{i}}$는 오른쪽 구간의 평균 기울기이고, $\frac{a_{i} - a_{i-1}}{h_{i-1}}$ 은 왼쪽 구간의 평균 기울기입니다. 즉, $\alpha_{i}$는 **양쪽 구간의 기울기 변화량의 차이**를 스케일링 한 값으로, 해당 노드에서 스플라인이 요구하는 '곡률 (휘어짐)의 정도'를 수치화한 지표입니다
+- :material-map-marker-path: **Position Interpolation**
+    $$X(s) = S_{x}(s), \quad Y(s) = S_{y}(s)$$
 
-이로써 $c_{i}$를 미지수로 하는 $N \time N$ 삼중 대각 행렬 (Tridiagonal Matrix) 시스템이 완성되며, 이는 토마스 알고리즘 (전진 소거 및 후진 대입)을 통해 $O(N)$의 시잔 복잡도로 확정적 (Deterministic) 연산이 가능합니다
+- :material-compass-outline: **Heading (Yaw) Derivation**
+    $$\theta (s) = \text{arctan2}\left(\frac{dY}{ds}, \frac{dX}{ds}\right)$$
 
-### 4. 수치 해석 예시 (Numerical Verification)
-개념 검증을 위해 4개의 데이터 포인트에 대한 1D Spline 계수를 직접 산출합니다
-- **주어진 점** : $(0, 0), (1, 1), (2, 0), (3, 1)$
-- **초기 설정** : 
+- :material-steering: **Curvature Derivation**
+    $$\kappa(s) = \frac{\frac{d^{2}Y}{ds^{2}}\frac{dX}{ds} - \frac{d^{2}X}{ds^{2}}\frac{dY}{ds}}{\left(\left(\frac{dX}{ds}\right)^{2} + \left(\frac{dY}{ds}\right)^{2}\right)^{3/2}}$$
+
+</div>
+
+## :material-numeric-3-box: 3. Core Coefficient Derivation & Tridiagonal Matrix
+
+The core of spline interpolation is setting up a system of equations to solve for $c_{i}$ through the constraint that **all intervals must smoothly connect at the boundary points $x_{i+1}$**.
+
+### 3.1. Discrete Interpretation of Continuity Condition
+
+The right endpoint of interval $i$ and the left endpoint of interval $i+1$ are the same node $x_{i+1}$ in the global coordinate system:
+
+- **Right endpoint of interval $i$**: $(x - x_{i}) = h_{i}$ in local coordinates.
+- **Left endpoint of interval $i+1$**: $(x - x_{i+1}) = 0$ in its own local coordinates.
+
+Therefore, the continuity condition boils down to: "At the same global node $x_{i+1}$, the state of the end of the left curve $S_{i}$ and the start of the right curve $S_{i+1}$ must match."
+
+### 3.2. System of Equations via Derivative Continuity
+
+=== "Step 1. Second Derivative Continuity"
+    - $S_{i}^{\prime \prime}(x_{i+1}) = 2c_{i} + 6d_{i}h_{i}$
+    - $S_{i+1}^{\prime \prime}(x_{i+1}) = 2c_{i+1} + 6d_{i+1}(0) = 2c_{i+1}$
+    - Equating them: $2c_{i} + 6d_{i}h_{i} = 2c_{i+1} \implies d_{i} = \frac{c_{i+1} - c_{i}}{3h_{i}}$
+
+=== "Step 2. Function Value Continuity"
+    - $S_{i}(x_{i+1}) = a_{i} + b_{i}h_{i} + c_{i}h_{i}^{2} + d_{i}h_{i}^{3} = a_{i+1}$
+    - Rearranging for $b_{i}$ (substituting $d_{i}$ from Step 1):
+      $$b_{i} = \frac{a_{i+1} - a_{i}}{h_{i}} - \frac{h_{i}}{3}(c_{i+1} + 2c_{i})$$
+
+=== "Step 3. First Derivative Continuity & Deriving $\alpha$"
+    - $S_{i}^{\prime}(x_{i+1}) = b_{i} + 2c_{i}h_{i} + 3d_{i}h_{i}^{2} = b_{i+1}$
+    - By substituting $b_{i}, b_{i+1}, d_{i}$ obtained in Steps 1 and 2 into this equation and sorting in descending order of $c$, the following core relation is derived:
+      $$h_{i-1}c_{i-1} + 2(h_{i-1} + h_{i})c_{i} + h_{i}c_{i+1} = \frac{3}{h_{i}}(a_{i+1} - a_{i}) - \frac{3}{h_{i-1}}(a_{i} - a_{i-1})$$
+
+### 3.3. Definition and Meaning of the Auxiliary Term $\alpha$
+
+We define the right side of the equation as $\alpha_{i}$:
+
+!!! math "Alpha Definition"
+    $$\alpha_{i} = \frac{3}{h_{i}}(a_{i+1} - a_{i}) - \frac{3}{h_{i-1}}(a_{i} - a_{i-1})$$
+
+**Physical Meaning:**
+$\frac{a_{i+1} - a_{i}}{h_{i}}$ is the average slope of the right interval, and $\frac{a_{i} - a_{i-1}}{h_{i-1}}$ is the average slope of the left interval. That is, $\alpha_{i}$ is a scaled value of the **difference in slope change between both intervals**, which quantifies the degree of 'curvature (bending)' required by the spline at that node.
+
+This completes the $N \times N$ Tridiagonal Matrix system with $c_{i}$ as the unknown. It allows deterministic operations with $\mathcal{O}(N)$ time complexity through the Thomas algorithm (forward elimination and backward substitution).
+
+## :material-numeric-4-box: 4. Numerical Verification Example
+
+To verify the concept, we directly calculate the 1D Spline coefficients for 4 data points.
+
+- **Given Points**: $(0, 0), (1, 1), (2, 0), (3, 1)$
+- **Initial Setup**: 
   - $h_{0} = 1, h_{1} = 1, h_{2} = 1$
   - $a_{0} = 0, a_{1} = 1, a_{2} = 0, a_{3} = 1$
 
-#### 4.1. $\alpha$ 산출
-- $\alpha_{1} = \frac{3}{1}(0 - 1) - \frac{3}{1}(1 - 0) = -3 -3 = -6$
+### 4.1. Calculation of $\alpha$
+
+- $\alpha_{1} = \frac{3}{1}(0 - 1) - \frac{3}{1}(1 - 0) = -3 - 3 = -6$
 - $\alpha_{2} = \frac{3}{1}(1 - 0) - \frac{3}{1}(0 - 1) = 3 - (-3) = 6$
 
-#### 4.2. 삼중 대각 행렬 시스템 구성 및 풀이
-Natural Spline 경계 조건에 의해 $c_{0} = 0, c_{3} = 0$입니다
-- $i = 1: 1 \cdot 0 + 2(1 + 1)c_{1} + 1 \cdot c_{2} = -6 \rightarrow 4c_{1} + c_{2} = -6$
-- $i = 2: 1 \cdot c_{1} + 2(1 + 1)c_{2} + 1 \cdot 0 = 6 \rightarrow c_{1} + 4c_{2} = 6$
+### 4.2. Constructing and Solving the Tridiagonal Matrix System
 
-연립방정식을 해석합니다
-1. $c_{2} = 6 - 4c_{1}$을 첫 번째 식에 대입
-2. $c_{2} = -6 -4c_{1}$을 $c_{1} + 4c_{2} = 6$에 대입
-3. $c_{1} + 4(-6 - 4c_{1}) = 6 \rightarrow c_{1}-24-16c_{1} = 6 \rightarrow -15c_{1} = 30 \rightarrow c_{1} = -2$
-4. $c_{2} = -6 -4(-2) = 2$
-5. 결과 : $c_{0} = 0, c_{1} = -2, c_{2} = 2, c_{3} = 0$
+Due to the Natural Spline boundary conditions, $c_{0} = 0$ and $c_{3} = 0$.
 
-#### 4.3 나머지 계수 $(b_{i}, d_{i})$ 산출
-공식 대입 : $b_{i} = \frac{a_{i+1} - a_{i}}{h_{i}} - \frac{h_{i}}{3}(c_{i+1} + 2c_{i}), \quad d_{i} = \frac{c_{i+1} - c_{i}}{3h_{i}}$
+- For $i = 1: 1 \cdot 0 + 2(1 + 1)c_{1} + 1 \cdot c_{2} = -6 \implies 4c_{1} + c_{2} = -6$
+- For $i = 2: 1 \cdot c_{1} + 2(1 + 1)c_{2} + 1 \cdot 0 = 6 \implies c_{1} + 4c_{2} = 6$
 
-- 구간 0 $[0, 1]$
-  - $b_{0} = \frac{1-0}{1}-\frac{1}{3}(-2+0) = 1 + \frac{2}{3} \approx 1.667$
-  - $d_{0} = \frac{-2-0}{3} \approx -0.667$
+Solving the system of equations:
 
-- 구간 1 $[1, 2]$
-  - $b_{1} = \frac{0-1}{1}-\frac{1}{3}(2-4) = -1+\frac{2}{3} \approx -0.333$
-  - $d_{1} = \frac{2-(-2)}{3} \approx 1.333$
+1. Substitute $c_{2} = -6 - 4c_{1}$ into the second equation:
+   $$c_{1} + 4(-6 - 4c_{1}) = 6 \implies c_{1} - 24 - 16c_{1} = 6 \implies -15c_{1} = 30 \implies c_{1} = -2$$
+2. $c_{2} = -6 - 4(-2) = 2$
+3. Result: $c_{0} = 0, c_{1} = -2, c_{2} = 2, c_{3} = 0$
 
-- 구간 2 $[2, 3]$
-  - $b_{2} = \frac{1-0}{1} - \frac{1}{3}(0+4) = 1 - \frac{4}{3} \approx -0.333$
-  - $d_{2} = \frac{0-2}{3} \approx -0.667$
+### 4.3. Calculation of Remaining Coefficients ($b_{i}, d_{i}$)
 
-#### 4.4. 최종 다항식 모델
-수치적 연산을 바탕으로 구축된 최종 스플라인 다항식은 다음과 같습니다
-- $S_{0}(x) = 1.667x - 0.667x^{3} \quad (x \in [0, 1])$
-- $S_{1}(x) = 1 - 0.333(x - 1) -2(x - 1)^{2} + 1.333(x - 1)^{3} \quad (x \in [1, 2])$
-- $S_{2}(x) = -0.333(x - 2) + 2(x - 2)^{2} - 0.667(x - 2)^{3} \quad (x \in [2, 3])$
+Using the formulas: $b_{i} = \frac{a_{i+1} - a_{i}}{h_{i}} - \frac{h_{i}}{3}(c_{i+1} + 2c_{i}), \quad d_{i} = \frac{c_{i+1} - c_{i}}{3h_{i}}$
 
+=== "Interval 0: $[0, 1]$"
+    - $b_{0} = \frac{1-0}{1} - \frac{1}{3}(-2+0) = 1 + \frac{2}{3} \approx 1.667$
+    - $d_{0} = \frac{-2-0}{3} \approx -0.667$
 
+=== "Interval 1: $[1, 2]$"
+    - $b_{1} = \frac{0-1}{1} - \frac{1}{3}(2-4) = -1 + \frac{2}{3} \approx -0.333$
+    - $d_{1} = \frac{2-(-2)}{3} \approx 1.333$
 
+=== "Interval 2: $[2, 3]$"
+    - $b_{2} = \frac{1-0}{1} - \frac{1}{3}(0+4) = 1 - \frac{4}{3} \approx -0.333$
+    - $d_{2} = \frac{0-2}{3} \approx -0.667$
+
+### 4.4. Final Polynomial Model
+
+Based on the numerical operations, the final spline polynomials are:
+
+!!! success "Final Spline Equations"
+    - $S_{0}(x) = 1.667x - 0.667x^{3} \quad (x \in [0, 1])$
+    - $S_{1}(x) = 1 - 0.333(x - 1) - 2(x - 1)^{2} + 1.333(x - 1)^{3} \quad (x \in [1, 2])$
+    - $S_{2}(x) = -0.333(x - 2) + 2(x - 2)^{2} - 0.667(x - 2)^{3} \quad (x \in [2, 3])$

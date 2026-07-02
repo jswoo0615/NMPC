@@ -108,44 +108,30 @@ namespace Optimization {
                  * 
                  * This method is intended to be called when an external supervisory
                  * component (KKT Monitor, solver supervisor, timeout monitor, etc..)
-                 * has already determined that optimization has failed
+                 * has already determined that optimization has failed.
                  * 
-                 * Control vector convention:
-                 *  u(0) : Steering command
-                 *  u(1) : Longitudinal acceleration command
-                 * 
-                 * Any alternative control ordering will produce incorrect behavior
-                 * 
-                 * @param braking_acceleration Emergency braking command. Must be less than or equal to zero
-                 * @return Emergency fallback control input
+                 * @param braking_acceleration Emergency braking command. Must be less than or equal to zero.
+                 * @return Emergency fallback control input (Steering = 0, Accel = braking)
                  */
                 matrix::StaticVector<double, Nu> generate_fallback_control(
                     double braking_acceleration) const {
                     static_assert(Nu >= 2, "Fallback control logic requires at least two control inputs: steering and acceleration");
                     assert(braking_acceleration <= 0.0 && "Emergency braking acceleration must be <= 0");
+                    
                     matrix::StaticVector<double, Nu> safe_u;
-
                     safe_u.set_zero();
 
-                    // Steering straight ahead
-                    safe_u(0) = 0.0;
-                    // Maximum braking command
-                    safe_u(1) = braking_acceleration;
+                    enum ControlIndex {
+                        STEERING = 0,
+                        ACCELERATION = 1
+                    };
+
+                    // Steer straight ahead
+                    safe_u(ControlIndex::STEERING) = 0.0;
+                    // Apply maximum emergency braking
+                    safe_u(ControlIndex::ACCELERATION) = braking_acceleration;
 
                     return safe_u;
-
-                    // TODO
-                    /**
-                     * u(0), u(1) 하드코딩 제거를 위해
-                     * enum ControlIndex {
-                     *      STEERING = 0,
-                     *      ACCELERATION = 1
-                     * };
-                     * 
-                     * ---
-                     * safe_u(ControlIndex::STEERING);
-                     * safe_u(ControlIndex::ACCELERATION);
-                     */
                 }
         };
     } // namespace controller
