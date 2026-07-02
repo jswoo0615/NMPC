@@ -1,0 +1,1780 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="High-performance NMPC Controller">
+      
+      
+        <meta name="author" content="Junsang Woo">
+      
+      
+      
+        <link rel="prev" href="../../SafeBuffer/">
+      
+      
+        <link rel="next" href="../evaluate_merit/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Slack Variables - NMPC Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#technical-note-slack-variables-and-l1-penalty" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="NMPC Documentation" class="md-header__button md-logo" aria-label="NMPC Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NMPC Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Slack Variables
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../Dynamics/Overview/" class="md-tabs__link">
+          
+  
+  
+  Dynamics
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../SparseNMPC_IPM/" class="md-tabs__link">
+          
+  
+  
+  Control
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../Solver/RiccatiSolver/" class="md-tabs__link">
+          
+  
+  
+  Solver
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../Evaluator/StaticCubicSpline/StaticCubicSpline/" class="md-tabs__link">
+          
+  
+  
+  Evaluator
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="NMPC Documentation" class="md-nav__button md-logo" aria-label="NMPC Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    NMPC Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamics
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Dynamics
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Dynamics/Overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Dynamics/API_Reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_3" id="__nav_2_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Dynamics/Technical_Notes/Vehicle_Equations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vehicle Equations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Control
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sparse NMPC
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sparse NMPC
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SparseNMPC_IPM/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SparseNMPC_IPM_API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interior Point Method
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interior Point Method
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Primal_Dual_IPM/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Primal-Dual IPM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fail-Safe System
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Fail-Safe System
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SafeBuffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Safe Buffer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3_4" id="__nav_3_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Variables
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#question-1-how-can-s-3-when-c-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 1: How can \(s = 3\) when \(c = -5\)?
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Question 1: How can \(s = 3\) when \(c = -5\)?">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-mathematical-correction-its-an-equality-not-an-inequality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Mathematical Correction: It's an Equality, Not an Inequality
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-then-why-does-s-3-emerge-when-c-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Then why does \(s = 3\) emerge when \(c = -5\)?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-the-l1-penalty-intervention-do-not-lie" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. The L1 Penalty Intervention: "Do Not Lie"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conclusion
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#question-2-arent-slack-variables-tied-to-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 2: Aren't Slack Variables Tied to Constraints?
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Question 2: Aren&#39;t Slack Variables Tied to Constraints?">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#answer-theoretical-unity-vs-numerical-separation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Answer: Theoretical Unity vs. Numerical Separation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evaluate_merit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Merit Function
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Exact_L1_Penalty_and_Log_Barrier/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exact L1 Penalty
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Solver
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Solver
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Solver/RiccatiSolver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Riccati Solver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluator
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Evaluator
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Evaluator/StaticCubicSpline/StaticCubicSpline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Static Cubic Spline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Evaluator/StaticCubicSpline/StaticCubicSpline_Equations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spline Derivation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#question-1-how-can-s-3-when-c-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 1: How can \(s = 3\) when \(c = -5\)?
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Question 1: How can \(s = 3\) when \(c = -5\)?">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-mathematical-correction-its-an-equality-not-an-inequality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Mathematical Correction: It's an Equality, Not an Inequality
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-then-why-does-s-3-emerge-when-c-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Then why does \(s = 3\) emerge when \(c = -5\)?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-the-l1-penalty-intervention-do-not-lie" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. The L1 Penalty Intervention: "Do Not Lie"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conclusion
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#question-2-arent-slack-variables-tied-to-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 2: Aren't Slack Variables Tied to Constraints?
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Question 2: Aren&#39;t Slack Variables Tied to Constraints?">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#answer-theoretical-unity-vs-numerical-separation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Answer: Theoretical Unity vs. Numerical Separation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="technical-note-slack-variables-and-l1-penalty">Technical Note: Slack Variables and L1 Penalty</h1>
+<div class="admonition info">
+<p class="admonition-title">Background</p>
+<p>This document summarizes common misconceptions encountered while implementing a primal-dual Interior Point Method for Sparse NMPC. </p>
+<p>It is intended to explain the intuition behind the numerical behavior rather than provide a rigorous mathematical proof.</p>
+</div>
+<h2 id="question-1-how-can-s-3-when-c-5"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m15.07 11.25-.9.92C13.45 12.89 13 13.5 13 15h-2v-.5c0-1.11.45-2.11 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41a2 2 0 0 0-2-2 2 2 0 0 0-2 2H8a4 4 0 0 1 4-4 4 4 0 0 1 4 4 3.2 3.2 0 0 1-.93 2.25M13 19h-2v-2h2M12 2A10 10 0 0 0 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10c0-5.53-4.5-10-10-10"/></svg></span> Question 1: How can <span class="arithmatex">\(s = 3\)</span> when <span class="arithmatex">\(c = -5\)</span>?</h2>
+<p><strong>Question:</strong></p>
+<blockquote>
+<p>Even if the vehicle is very safe, being 5m away from an obstacle (<span class="arithmatex">\(c = -5\)</span>), if the solver's internal slack variable is calculated as <span class="arithmatex">\(s = 3\)</span>, it results in <span class="arithmatex">\(|-5 + 3| = |-2| = 2\)</span>, incurring a massive penalty of 2000 (<span class="arithmatex">\(w_{L1} \times 2\)</span>). 
+If <span class="arithmatex">\(s = 3\)</span>, since slack variables are introduced as <span class="arithmatex">\(g(x) + s \ge 0\)</span>, does this mean the constraint boundary flexibly shifted to <span class="arithmatex">\(g(x) \ge -3\)</span>?</p>
+</blockquote>
+<h3 id="1-mathematical-correction-its-an-equality-not-an-inequality">1. Mathematical Correction: It's an Equality, Not an Inequality</h3>
+<p>It is intuitive to think that introducing a slack variable to <span class="arithmatex">\(g(x) + s \ge 0\)</span> shifts the boundary to <span class="arithmatex">\(g(x) \ge -3\)</span> when <span class="arithmatex">\(s = 3\)</span>. However, the actual mathematical transformation in IPM works differently.</p>
+<p>When the physical constraint (e.g., safe margin violation) is <span class="arithmatex">\(c(x) \le 0\)</span>, the IPM solver introduces a virtual positive variable <span class="arithmatex">\(s\)</span> (<span class="arithmatex">\(s &gt; 0\)</span>) to forcefully convert it into a <strong>perfect Equality</strong>.</p>
+<div class="admonition math">
+<p class="admonition-title">Equality Constraint</p>
+<div class="arithmatex">\[
+c(x) + s = 0 \quad \text{subject to } s &gt; 0
+\]</div>
+</div>
+<ul>
+<li><strong>Consistent State</strong>: If the vehicle is 5m away from an obstacle (<span class="arithmatex">\(c(x) = -5\)</span>), the slack variable <span class="arithmatex">\(s\)</span> must be exactly <span class="arithmatex">\(5\)</span> for the equation to equal <span class="arithmatex">\(0\)</span> (<span class="arithmatex">\(-5 + 5 = 0\)</span>).</li>
+</ul>
+<h3 id="2-then-why-does-s-3-emerge-when-c-5">2. Then why does <span class="arithmatex">\(s = 3\)</span> emerge when <span class="arithmatex">\(c = -5\)</span>?</h3>
+<p>Here lies the most critical characteristic of the Primal-Dual IPM.
+In the "brain" of the solver, the physical state <span class="arithmatex">\(x\)</span> (vehicle position, etc.) and the virtual variable <span class="arithmatex">\(s\)</span> (slack variable) are treated as <strong>completely independent entities</strong> and are calculated and updated separately.</p>
+<div class="grid cards">
+<ul>
+<li>
+<p><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2m0 2v4h10V4zm0 6v2h2v-2zm4 0v2h2v-2zm4 0v2h2v-2zm-8 4v2h2v-2zm4 0v2h2v-2zm4 0v2h2v-2zm-8 4v2h2v-2zm4 0v2h2v-2zm4 0v2h2v-2z"/></svg></span>
+    <strong>1. Newton Step (Direction Calculation)</strong></p>
+<p>The solver simultaneously calculates how much to change <span class="arithmatex">\(x\)</span> (<span class="arithmatex">\(\Delta x\)</span>) and how much to change <span class="arithmatex">\(s\)</span> (<span class="arithmatex">\(\Delta s\)</span>) by solving a system of equations (<a href="../../../Solver/RiccatiSolver/">RiccatiSolver</a>).</p>
+</li>
+<li>
+<p><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M11 5H8l4-4 4 4h-3v4.43c-.75.46-1.42 1.03-2 1.69zm11 6-4-4v3a6.747 6.747 0 0 0-7 6.17A3.006 3.006 0 0 0 9.17 20 3.006 3.006 0 0 0 13 21.83 3.01 3.01 0 0 0 14.83 18c-.3-.86-.98-1.53-1.83-1.83.47-4 4.47-4.2 4.95-4.2v3zm-11.37.59A7.63 7.63 0 0 0 6 10V7l-4 4 4 4v-3c1.34.03 2.63.5 3.64 1.4.25-.64.58-1.25.99-1.81"/></svg></span>
+    <strong>2. Line Search (Applying Step Size <span class="arithmatex">\(\alpha\)</span>)</strong></p>
+<p>Both variables take a step of size <span class="arithmatex">\(\alpha\)</span>:</p>
+<ul>
+<li>New physical state: <span class="arithmatex">\(x_{\text{new}} = x + \alpha \Delta x \implies\)</span> results in <span class="arithmatex">\(c(x_{\text{new}}) = -5\)</span></li>
+<li>New slack variable: <span class="arithmatex">\(s_{\text{new}} = s + \alpha \Delta s \implies\)</span> results in <span class="arithmatex">\(s_{\text{new}} = 3\)</span></li>
+</ul>
+</li>
+</ul>
+</div>
+<p><strong>Why don't they match?</strong> 
+Because <strong><span class="arithmatex">\(c(x)\)</span> is a non-linear function</strong>, while the <span class="arithmatex">\(\Delta x\)</span> and <span class="arithmatex">\(\Delta s\)</span> calculated by the solver are based on <strong>linearized approximations</strong> (Jacobian). By taking a large step (<span class="arithmatex">\(\alpha\)</span>) assuming the world is linear, a discrepancy (Inconsistency) of <span class="arithmatex">\(2\)</span> occurs between the physical reality (<span class="arithmatex">\(c = -5\)</span>) and the mathematical expectation (<span class="arithmatex">\(s = 3\)</span>).</p>
+<h3 id="3-the-l1-penalty-intervention-do-not-lie">3. The L1 Penalty Intervention: "Do Not Lie"</h3>
+<p>The true meaning of <span class="arithmatex">\(|-5 + 3| = |-2| = 2\)</span> becomes clear.
+Since the car is 5m away (<span class="arithmatex">\(c = -5\)</span>), it is physically very safe with no collision.
+However, mathematically, the absolute rule <span class="arithmatex">\(c(x) + s = 0\)</span> has been broken: <span class="arithmatex">\(-5 + 3 = -2 \neq 0\)</span>. The solver's physical world and mathematical world have lost synchronization; they are "lying" to each other.</p>
+<div class="admonition warning">
+<p class="admonition-title">L1 Penalty Response</p>
+<p><strong><a href="../evaluate_merit/">evaluate_merit</a></strong>: "I acknowledge the car is physically safe, but the difference between your calculated physical state (<span class="arithmatex">\(c\)</span>) and virtual state (<span class="arithmatex">\(s\)</span>) is off by 2. This means the numerical analysis is collapsing. Penalty: 2000! Discard this step size (<span class="arithmatex">\(\alpha\)</span>) and recalculate!"</p>
+</div>
+<h3 id="conclusion">Conclusion</h3>
+<p>The constraint boundary does <em>not</em> flexibly shift to <span class="arithmatex">\(g(x) \ge -3\)</span>.
+Conversely, the physical law <span class="arithmatex">\(c(x)\)</span> and the mathematical virtual variable <span class="arithmatex">\(s\)</span> must be perfectly bound by <span class="arithmatex">\(c(x) + s = 0\)</span>. The moment they diverge even slightly (e.g., <span class="arithmatex">\(c = -5\)</span>, <span class="arithmatex">\(s = 3\)</span>), a strict L1 penalty is imposed to prevent trajectory derailment caused by linearization errors.</p>
+<hr />
+<h2 id="question-2-arent-slack-variables-tied-to-constraints"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M11 18h2v-2h-2zm1-16A10 10 0 0 0 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10A10 10 0 0 0 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8m0-14a4 4 0 0 0-4 4h2a2 2 0 0 1 2-2 2 2 0 0 1 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5a4 4 0 0 0-4-4"/></svg></span> Question 2: Aren't Slack Variables Tied to Constraints?</h2>
+<p><strong>Question:</strong></p>
+<blockquote>
+<p>Aren't slack variables inherently related to constraints? Why are they separated?</p>
+</blockquote>
+<h3 id="answer-theoretical-unity-vs-numerical-separation">Answer: Theoretical Unity vs. Numerical Separation</h3>
+<p>Theoretically, you are 100% correct. However, the moment the math on paper is translated into a <strong>C++ Numerical Solver</strong>, they are divorced into completely independent variables.</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">1. Solver Structure: Dimensional Lifting</label><label for="__tabbed_1_2">2. The Betrayal of Linearization (Linearization Error)</label><label for="__tabbed_1_3">3. The True Role of L1 Penalty: A Mathematical Rubber Band</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p>If the slack variable were completely tied to the constraint, the solver could just substitute <span class="arithmatex">\(-c(x)\)</span> for <span class="arithmatex">\(s\)</span> and solve:
+$<span class="arithmatex">\(-\mu \log(-c(x))\)</span>$</p>
+<p>However, if <span class="arithmatex">\(c(x)\)</span> is a non-linear function, trapping a non-linear function inside a log function causes the Jacobian and Hessian matrices to become incredibly tangled. It becomes a horrific computation impossible to solve within <span class="arithmatex">\(25\text{ms}\)</span>.</p>
+<p>Instead, IPM designers approach it differently: <strong>"Let's elevate the slack variable <span class="arithmatex">\(s\)</span> from a dependent variable of <span class="arithmatex">\(x\)</span> to a 'completely independent optimization variable' on par with <span class="arithmatex">\(x\)</span>!"</strong></p>
+<ul>
+<li><strong>Original Variable</strong>: <span class="arithmatex">\(x\)</span> (vehicle state, steering, etc.)</li>
+<li><strong>IPM Variable</strong>: <span class="arithmatex">\(Z = [x, s, \lambda]^\top\)</span></li>
+</ul>
+<p>Now, in the eyes of the solver, <span class="arithmatex">\(x\)</span> and <span class="arithmatex">\(s\)</span> are just array indices <code>Z[0]</code> and <code>Z[1]</code>. They have gained the right to move completely independently.</p>
+</div>
+<div class="tabbed-block">
+<p>Taking these two independent variables <span class="arithmatex">\(x\)</span> and <span class="arithmatex">\(s\)</span>, the solver uses Newton's Method for the next step. Newton's Method predicts the complex curved world by bluntly simplifying it into "straight lines" (tangents).</p>
+<p>The solver solves the system of equations to calculate independent steps (<span class="arithmatex">\(\Delta x\)</span>, <span class="arithmatex">\(\Delta s\)</span>):</p>
+<ul>
+<li><span class="arithmatex">\(x_{\text{new}} = x + \alpha \Delta x\)</span></li>
+<li><span class="arithmatex">\(s_{\text{new}} = s + \alpha \Delta s\)</span></li>
+</ul>
+<p>Here, tragedy strikes:</p>
+<ul>
+<li><span class="arithmatex">\(s\)</span> is originally a virtual variable, so it moves perfectly in a <strong>straight line</strong> as predicted.</li>
+<li>However, the physical reality <span class="arithmatex">\(c(x_{\text{new}})\)</span> created by the movement of <span class="arithmatex">\(x\)</span> is a <strong>non-linear curve</strong>.</li>
+</ul>
+<p>Assuming a straight path, the solver takes a large step (<span class="arithmatex">\(\alpha\)</span>). But the actual physical world <span class="arithmatex">\(c(x)\)</span> curves away, breaking the promise <span class="arithmatex">\(c(x_{\text{new}}) + s_{\text{new}} = 0\)</span> between the two independent variables.</p>
+</div>
+<div class="tabbed-block">
+<p>In summary, <strong>while the slack variable <span class="arithmatex">\(s\)</span> is inherently born from the constraint <span class="arithmatex">\(c(x)\)</span>, it is unleashed as an 'independent free variable' inside the solver to speed up optimization.</strong></p>
+<p>When these two freed variables (<span class="arithmatex">\(c(x)\)</span> and <span class="arithmatex">\(s\)</span>) try to tear apart due to linearization errors, the <strong>ruthless mathematical rubber band</strong> that forcefully binds them together is the L1 Penalty term:</p>
+<div class="arithmatex">\[w_{L1} |c(x_{\text{new}}) + s_{\text{new}}|\]</div>
+</div>
+</div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.instant", "navigation.tracking", "search.highlight", "search.suggest", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../../../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="https://unpkg.com/mermaid@11/dist/mermaid.min.js"></script>
+      
+        <script src="../../../javascripts/mermaid.js"></script>
+      
+    
+  </body>
+</html>

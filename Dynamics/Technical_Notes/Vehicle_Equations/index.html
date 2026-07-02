@@ -1,0 +1,1934 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="High-performance NMPC Controller">
+      
+      
+        <meta name="author" content="Junsang Woo">
+      
+      
+      
+        <link rel="prev" href="../../API_Reference/">
+      
+      
+        <link rel="next" href="../../../Control/SparseNMPC_IPM/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Vehicle Equations - NMPC Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#vehicle-dynamics-equations" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="NMPC Documentation" class="md-header__button md-logo" aria-label="NMPC Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NMPC Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Vehicle Equations
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../Overview/" class="md-tabs__link">
+          
+  
+  
+  Dynamics
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../Control/SparseNMPC_IPM/" class="md-tabs__link">
+          
+  
+  
+  Control
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../Solver/RiccatiSolver/" class="md-tabs__link">
+          
+  
+  
+  Solver
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../Evaluator/StaticCubicSpline/StaticCubicSpline/" class="md-tabs__link">
+          
+  
+  
+  Evaluator
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="NMPC Documentation" class="md-nav__button md-logo" aria-label="NMPC Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    NMPC Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamics
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Dynamics
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../API_Reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2_3" id="__nav_2_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vehicle Equations
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vehicle Equations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-state-and-input-definitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. State and Input Definitions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-load-transfer-physics-vehiclephysicscorehpp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Load Transfer Physics (VehiclePhysicsCore.hpp)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Load Transfer Physics (VehiclePhysicsCore.hpp)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-quasi-static-load-transfer-real-time-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Quasi-Static Load Transfer (Real-Time Model)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-suspension-geometric-load-transfer-high-fidelity-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Suspension Geometric Load Transfer (High-Fidelity Model)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-tire-physics-magic-formula" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Tire Physics &amp; Magic Formula
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Tire Physics &amp; Magic Formula">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-steady-state-slip-angle-calculation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Steady-State Slip Angle calculation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-relaxation-length-first-order-delay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Relaxation Length (First-Order Delay)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-pacejka-magic-formula" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Pacejka Magic Formula
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-frenet-kinematics-and-equations-of-motion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Frenet Kinematics and Equations of Motion
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Frenet Kinematics and Equations of Motion">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-kinematics-path-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Kinematics (Path Tracking)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-dynamics-body-accelerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Dynamics (Body Accelerations)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Control
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sparse NMPC
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sparse NMPC
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Control/SparseNMPC_IPM/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Control/SparseNMPC_IPM_API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interior Point Method
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interior Point Method
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Control/IPM/Primal_Dual_IPM/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Primal-Dual IPM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fail-Safe System
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Fail-Safe System
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Control/SafeBuffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Safe Buffer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_4" id="__nav_3_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Control/IPM/Slack_Variables_in_SparseNMPC_IPM/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Control/IPM/evaluate_merit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Merit Function
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Control/IPM/Exact_L1_Penalty_and_Log_Barrier/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exact L1 Penalty
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Solver
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Solver
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Solver/RiccatiSolver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Riccati Solver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluator
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Evaluator
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Evaluator/StaticCubicSpline/StaticCubicSpline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Static Cubic Spline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../Evaluator/StaticCubicSpline/StaticCubicSpline_Equations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spline Derivation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-state-and-input-definitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. State and Input Definitions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-load-transfer-physics-vehiclephysicscorehpp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Load Transfer Physics (VehiclePhysicsCore.hpp)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Load Transfer Physics (VehiclePhysicsCore.hpp)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-quasi-static-load-transfer-real-time-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Quasi-Static Load Transfer (Real-Time Model)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-suspension-geometric-load-transfer-high-fidelity-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Suspension Geometric Load Transfer (High-Fidelity Model)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-tire-physics-magic-formula" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Tire Physics &amp; Magic Formula
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Tire Physics &amp; Magic Formula">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-steady-state-slip-angle-calculation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Steady-State Slip Angle calculation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-relaxation-length-first-order-delay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Relaxation Length (First-Order Delay)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-pacejka-magic-formula" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Pacejka Magic Formula
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-frenet-kinematics-and-equations-of-motion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Frenet Kinematics and Equations of Motion
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Frenet Kinematics and Equations of Motion">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-kinematics-path-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Kinematics (Path Tracking)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-dynamics-body-accelerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Dynamics (Body Accelerations)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="vehicle-dynamics-equations">Vehicle Dynamics Equations</h1>
+<div class="admonition info">
+<p class="admonition-title">Mathematical Foundation</p>
+<p>This Technical Note details the exact mathematical formulations implemented within <code>RealTimeDynamicsModel.hpp</code>, <code>HighFidelityDynamicsModel.hpp</code>, and <code>VehiclePhysicsCore.hpp</code>. </p>
+</div>
+<hr />
+<h2 id="1-state-and-input-definitions">1. State and Input Definitions</h2>
+<p>The vehicle state <span class="arithmatex">\(x \in \mathbb{R}^8\)</span> and control input <span class="arithmatex">\(u \in \mathbb{R}^2\)</span> are defined as follows:</p>
+<div class="arithmatex">\[
+x = \begin{bmatrix} s \\ d \\ \mu \\ v_x \\ v_y \\ r \\ \alpha_f \\ \alpha_r \end{bmatrix}, \quad
+u = \begin{bmatrix} \delta \\ a_{cmd} \end{bmatrix}
+\]</div>
+<table>
+<thead>
+<tr>
+<th style="text-align: center;">Variable</th>
+<th style="text-align: left;">Description</th>
+<th style="text-align: center;">Unit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center;"><span class="arithmatex">\(s\)</span></td>
+<td style="text-align: left;">Arc length along the reference path</td>
+<td style="text-align: center;">m</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="arithmatex">\(d\)</span></td>
+<td style="text-align: left;">Lateral deviation from the reference path</td>
+<td style="text-align: center;">m</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="arithmatex">\(\mu\)</span></td>
+<td style="text-align: left;">Heading angle error relative to the reference path</td>
+<td style="text-align: center;">rad</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="arithmatex">\(v_x\)</span></td>
+<td style="text-align: left;">Longitudinal velocity (body frame)</td>
+<td style="text-align: center;">m/s</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="arithmatex">\(v_y\)</span></td>
+<td style="text-align: left;">Lateral velocity (body frame)</td>
+<td style="text-align: center;">m/s</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="arithmatex">\(r\)</span></td>
+<td style="text-align: left;">Yaw rate (body frame)</td>
+<td style="text-align: center;">rad/s</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="arithmatex">\(\alpha_f\)</span></td>
+<td style="text-align: left;">Front tire slip angle</td>
+<td style="text-align: center;">rad</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="arithmatex">\(\alpha_r\)</span></td>
+<td style="text-align: left;">Rear tire slip angle</td>
+<td style="text-align: center;">rad</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="arithmatex">\(\delta\)</span></td>
+<td style="text-align: left;">Front steering angle</td>
+<td style="text-align: center;">rad</td>
+</tr>
+<tr>
+<td style="text-align: center;"><span class="arithmatex">\(a_{cmd}\)</span></td>
+<td style="text-align: left;">Longitudinal acceleration command</td>
+<td style="text-align: center;"><span class="arithmatex">\(m/s^2\)</span></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-load-transfer-physics-vehiclephysicscorehpp">2. Load Transfer Physics (<code>VehiclePhysicsCore.hpp</code>)</h2>
+<p>Accurate modeling of lateral forces requires estimating the normal load (<span class="arithmatex">\(F_z\)</span>) on each tire.</p>
+<h3 id="21-quasi-static-load-transfer-real-time-model">2.1 Quasi-Static Load Transfer (Real-Time Model)</h3>
+<p>To minimize computational burden in the NMPC loop, the <code>RealTimeDynamicsModel</code> uses a static approximation of lateral acceleration (<span class="arithmatex">\(a_y \approx v_x \cdot r\)</span>) to calculate weight transfer without requiring independent roll and pitch integrators.</p>
+<p><strong>Static Weight Distribution:</strong>
+$$
+F_{z,f}^{stat} = m g \frac{l_r}{L}, \quad F_{z,r}^{stat} = m g \frac{l_f}{L}
+$$</p>
+<p><strong>Longitudinal Load Transfer:</strong>
+$$
+\Delta F_z^{long} = m a_{cmd} \frac{h_{cg}}{L}
+$$</p>
+<p><strong>Lateral Load Transfer (Front &amp; Rear):</strong>
+$$
+\Delta F_{z,lat}^{front} = m (v_x r) \frac{h_{cg}}{t_f} K_{df}
+$$
+$$
+\Delta F_{z,lat}^{rear} = m (v_x r) \frac{h_{cg}}{t_r} (1 - K_{df})
+$$</p>
+<p>Where <span class="arithmatex">\(K_{df}\)</span> is the front roll stiffness distribution ratio, and <span class="arithmatex">\(t_f, t_r\)</span> are the track widths.</p>
+<h3 id="22-suspension-geometric-load-transfer-high-fidelity-model">2.2 Suspension Geometric Load Transfer (High-Fidelity Model)</h3>
+<p>The <code>HighFidelityDynamicsModel</code> actively calculates chassis roll (<span class="arithmatex">\(\phi\)</span>) and pitch (<span class="arithmatex">\(\theta\)</span>) by modeling the roll center heights and suspension spring stiffnesses.</p>
+<div class="arithmatex">\[
+\theta = \frac{m a_{cmd} h_{cg}}{K_{pitch}}
+$$
+$$
+\phi = \frac{m (v_x r) h_{roll\_arm}}{K_{roll} - m g h_{roll\_arm}}
+\]</div>
+<p>These angles are then used to compute the exact dynamic wheel loads and corresponding camber thrust effects.</p>
+<hr />
+<h2 id="3-tire-physics-magic-formula">3. Tire Physics &amp; Magic Formula</h2>
+<h3 id="31-steady-state-slip-angle-calculation">3.1 Steady-State Slip Angle calculation</h3>
+<p>The steady-state kinematic slip angles are computed using the velocities at the front and rear axles:</p>
+<div class="arithmatex">\[
+\alpha_{ss,f} = \delta - \arctan\left(\frac{v_y + l_f r}{v_x}\right)
+$$
+$$
+\alpha_{ss,r} = - \arctan\left(\frac{v_y - l_r r}{v_x}\right)
+\]</div>
+<h3 id="32-relaxation-length-first-order-delay">3.2 Relaxation Length (First-Order Delay)</h3>
+<p>Tire forces do not develop instantly. To prevent numerical instability and model real-world high-speed dynamics, a relaxation length (<span class="arithmatex">\(\sigma\)</span>) is introduced:</p>
+<div class="arithmatex">\[
+\dot{\alpha}_f = \frac{v_x}{\sigma_f} (\alpha_{ss,f} - \alpha_f)
+$$
+$$
+\dot{\alpha}_r = \frac{v_x}{\sigma_r} (\alpha_{ss,r} - \alpha_r)
+\]</div>
+<h3 id="33-pacejka-magic-formula">3.3 Pacejka Magic Formula</h3>
+<p>The non-linear lateral force <span class="arithmatex">\(F_y\)</span> is computed using a load-dependent Pacejka Magic Formula.</p>
+<p><strong>Friction Coefficient Decay:</strong>
+$$
+\mu = \mu_0 - d\mu (F_z - F_{z,nom})
+$$</p>
+<p><strong>Cornering Stiffness:</strong>
+$$
+C_\alpha = c_1 F_z - c_2 F_z^2
+$$</p>
+<p><strong>Lateral Force Calculation:</strong>
+$$
+D = \mu F_z, \quad B = \frac{C_\alpha}{C_{shape} D}
+$$
+$$
+F_y = D \sin(C_{shape} \arctan(B \alpha))
+$$</p>
+<p><em>(In the C++ implementation, standard <code>sin</code> and <code>atan</code> are substituted with high-speed LUT operations via <code>FastMath.hpp</code> when evaluating double precision, accelerating real-time integration.)</em></p>
+<hr />
+<h2 id="4-frenet-kinematics-and-equations-of-motion">4. Frenet Kinematics and Equations of Motion</h2>
+<p>Finally, combining the forces yields the state derivatives. </p>
+<p>Let <span class="arithmatex">\(\kappa\)</span> be the road curvature at the vehicle's position.</p>
+<h3 id="41-kinematics-path-tracking">4.1 Kinematics (Path Tracking)</h3>
+<div class="arithmatex">\[
+\dot{s} = \frac{v_x \cos(\mu) - v_y \sin(\mu)}{1 - d \cdot \kappa}
+$$
+$$
+\dot{d} = v_x \sin(\mu) + v_y \cos(\mu)
+$$
+$$
+\dot{\mu} = r - \kappa \cdot \dot{s}
+\]</div>
+<p><em>(To avoid singularities when driving strictly backward or perfectly on the path, the denominator <span class="arithmatex">\((1 - d \cdot \kappa)\)</span> is safely bounded.)</em></p>
+<h3 id="42-dynamics-body-accelerations">4.2 Dynamics (Body Accelerations)</h3>
+<div class="arithmatex">\[
+\dot{v}_x = a_{cmd} - \frac{F_{drag}}{m} + r \cdot v_y
+$$
+$$
+\dot{v}_y = \frac{F_{y,f} \cos(\delta) + F_{y,r}}{m} - r \cdot v_x
+$$
+$$
+\dot{r} = \frac{l_f F_{y,f} \cos(\delta) - l_r F_{y,r}}{I_z}
+\]</div>
+<p>These equations natively form the <span class="arithmatex">\(\dot{x} = f(x, u)\)</span> vector, which is fed into the Runge-Kutta 4 (RK4) integrator inside the <code>SparseNMPC_IPM</code> solver.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.instant", "navigation.tracking", "search.highlight", "search.suggest", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../../../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="https://unpkg.com/mermaid@11/dist/mermaid.min.js"></script>
+      
+        <script src="../../../javascripts/mermaid.js"></script>
+      
+    
+  </body>
+</html>
